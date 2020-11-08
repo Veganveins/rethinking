@@ -6,6 +6,7 @@ output: pdf_document
 Easy. These problems use the samples from the posterior distribution for the globe tossing example. This code will give you a specific set of samples, so that you can check your answers exactly.
 
 ```{r}
+library(rethinking)
 p_grid <- seq( from=0 , to=1 , length.out=1000 )
 prior <- rep( 1 , 1000 )
 likelihood <- dbinom( 6 , size=9 , prob=p_grid )

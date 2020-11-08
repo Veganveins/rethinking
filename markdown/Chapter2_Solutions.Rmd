@@ -210,7 +210,7 @@ p_b = .5
 p_test_a_given_a = .8
 
 p_test_a = .5*.8 + .5*.35 # my answer
-p_test_a = .5*.8 + .5*.65 # right answer ..?
+#p_test_a = .5*.8 + .5*.65 # right answer ..?
 
 p_a_g_positive_test = p_test_a_given_a * p_a / p_test_a
 p_a_g_positive_test
@@ -223,7 +223,7 @@ p_b = .64
 p_test_a_given_a = .8
 
 p_test_a = .36*.8 + .35*.64 # my answer
-p_test_a = .36*.8 + .65*.64 # right answer ..?
+#p_test_a = .36*.8 + .65*.64 # right answer ..?
 
 p_a_g_positive_test = p_test_a_given_a * p_a / p_test_a
 p_a_g_positive_test
