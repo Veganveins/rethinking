@@ -156,7 +156,10 @@ prior = rep(1, 1000)
 # assuming probability p of birthing a boy?
 likelihood = dbinom(sum(allbirths), size = length(allbirths), prob = p_grid)
 
+# calculate the posterior distribution
 posterior = likelihood * prior
+
+# standardize the posterior to sum to 1
 posterior = posterior / sum(posterior)
 
 plot(x = p_grid, y = posterior, type = 'l')
