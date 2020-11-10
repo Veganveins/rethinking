@@ -1,0 +1,164 @@
+---
+title: "chapter4_solutions"
+output: pdf_document
+---
+
+```{r}
+library(rethinking)
+data(Howell1)
+d <- Howell1
+d2 <- d[ d$age >= 18 , ]
+dens(d2$height)
+```
+
+```{r}
+curve( dnorm( x , 178 , 20 ) , from=100 , to=250 )
+```
+
+```{r}
+# 1000 samples with mean 178 and sd 20
+sample_mu <- rnorm(1e4, 178, 20) 
+
+# 1000 samples with minimum 0 and maximum 50
+sample_sigma <- runif(1e4, 0, 50) 
+
+# compute individual heights over the grid of 
+# mus and sigmas
+prior_h <- rnorm(1e4, sample_mu, sample_sigma)
+dens(prior_h)
+
+```
+
+Below code uses grid approximation to construct the posterior. It is not obvious how this works
+
+```{r}
+# The mean height in the data is 155, so make a list of means from 150 to 160
+mu.list <- seq( from=150, to=160 , length.out=100 )
+
+# The sd in the data is 7.7, so make a list of sd's from 7 to 8
+sigma.list <- seq( from=7 , to=9 , length.out=100 )
+
+# make a dataframe with one column for all sigma's and one column for all mu's
+post <- expand.grid( mu=mu.list , sigma=sigma.list )
+
+# get the log probability of each value of height under the assumption
+# of different mu's and sigmas
+# unclear why we use log probabilities...
+post$LL <- sapply( 1:nrow(post) , function(i) sum(
+          dnorm( d2$height , post$mu[i] , post$sigma[i] , log=TRUE ) ) )
+
+# not 100% sure what this is doing either....
+post$prod <- post$LL + dnorm( post$mu , 178 , 20 , TRUE ) +
+                                  dunif( post$sigma , 0 , 50 , TRUE )
+post$prob <- exp( post$prod - max(post$prod) )
+```
+
+Sample from the posterior
+
+```{r}
+# define the model
+flist <- alist(
+            height ~ dnorm( mu , sigma ) ,
+            mu ~ dnorm( 178 , 20 ) , # assume 178 mean height with sd of 20
+            sigma ~ dunif( 0 , 50 ) # uniform prior between 0 and 50
+)
+
+# fit the model to the data
+m4.1 <- quap( flist , data=d2 )
+
+# set the starting conditions for quap to use
+start <- list(
+    mu=mean(d2$height),
+  sigma=sd(d2$height)
+)
+
+# examine the posterior distribution
+precis(m4.1)
+```
+
+```{r}
+post <- extract.samples( m4.1 , n=1e4 )
+head(post)
+
+```
+
+```{r}
+xbar <- mean(d2$weight)
+# fit model
+m4.3 <- quap(
+alist(height ~ dnorm( mu , sigma ) ,
+mu <- a + b*( weight - xbar ) ,
+a ~ dnorm( 178 , 20 ) ,
+b ~ dlnorm( 0 , 1 ) ,
+sigma ~ dunif( 0 , 50 )
+) ,
+data=d2 )
+
+```
+
+
+```{r}
+# weight values of interest
+weight.seq <- seq( from=25 , to=70 , by=1 )
+
+#simulated heights
+sim.height <- sim( m4.3 , data=list(weight=weight.seq) )
+
+```
+
+```{r}
+# standaradize weight to avoid
+d$weight_s <- ( d$weight - mean(d$weight) )/sd(d$weight)
+
+# squared term for weight, standardized
+d$weight_s2 <- d$weight_s^2
+m4.5 <- quap(alist(
+height ~ dnorm( mu , sigma ) ,
+mu <- a + b1*weight_s + b2*weight_s2 ,
+a ~ dnorm( 178 , 20 ) ,
+b1 ~ dlnorm( 0 , 1 ) ,
+b2 ~ dnorm( 0 , 1 ) ,
+sigma ~ dunif( 0 , 50 )
+) ,
+data=d )
+```
+
+
+```{r}
+# store the range of weight values, on the standardized scale
+weight.seq <- seq( from=-2.2 , to=2 , length.out=30 )
+# ?
+pred_dat <- list( weight_s=weight.seq , weight_s2=weight.seq^2 )
+# get a distribution of mu's for each weight value
+# returns a matrix of 30 columns (one per weight)
+# with (default) 1,000 rows, each row is a value of mu
+mu <- link( m4.5 , data=pred_dat )
+# for each column, compute the mean
+# (if we had apply(mu, 1, mean), we would be calcing mean over each row)
+# returns a matrix of 30 mu's
+mu.mean <- apply( mu , 2 , mean )
+# for each column, compute the 89% interval for mu's
+# returns a list of 30 intervals for the mean height for each weight value
+mu.PI <- apply( mu , 2 , PI , prob=0.89 )
+# returns a matrix of 30 columns, 1000 rows of simulated heights 
+# for each weight value, 1000 possible heights
+sim.height <- sim( m4.5 , data=pred_dat )
+# the 89% interval of heights for each weight (not means!)
+height.PI <- apply( sim.height , 2 , PI , prob=0.89 )
+# plot height vs standardized weights (just raw data)
+plot( height ~ weight_s , d , col=col.alpha(rangi2,0.5) )
+# plot standardized weights vs the mean mu
+lines( weight.seq , mu.mean )
+# shade with the PI of possible mean* heights for each weight
+shade( mu.PI , weight.seq )
+# shade with the PI of possible heights for each weight
+shade( height.PI , weight.seq )
+
+
+```
+
+
+
+
+
+
