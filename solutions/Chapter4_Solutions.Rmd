@@ -379,40 +379,80 @@ shade(mean_uncertainty, weight_seq, col = col.alpha('red',  .5))
 
 # 97% interval for predicted heights
 shade(mean_heights.PI, weight_seq, col = col.alpha('grey', .5))
-
-
 ```
 
 
 4H4. Plot the prior predictive distribution for the polynomial regression model in the chapter. You can modify the code that plots the linear regression prior predictive distribution. Can you modify the prior distributions of alpha, beta1, and beta2 so that the prior predictions stay within the biologically reasonable outcome space? That is to say: Do not try to fit the data by hand. But do try to keep the curves consistent with what you know about height and weight, before seeing these exact data.
 
 ```{r}
-alpha <- rnorm(n = 1000, mean = 178, sd = 20)
-beta <- rlnorm(n = 1000, mean = 0, sd = 1)
-#summary(log(d$weight))
-weights <- seq(from = 1.4, to = 4.1, length.out = 1000)
+set.seed(2971)
+N <- 100 # 100 lines
+a <- rnorm( N , 178 , 20 )
+b <- rnorm( N , 0 , 10 )
 
-sample_mu <- alpha + beta * weights
-sample_sigma <- runif(n = 1000, min = 0, max = 50)
-  
-prior_h_poly <- rnorm(1e4, mean = sample_mu, sd = sample_sigma)
-dens(prior_h_poly)
-abline(h = 272)
+
+plot( NULL , xlim=range(d2$weight) , ylim=c(-100,400) ,
+xlab="weight" , ylab="height" )
+abline( h=0 , lty=2 )
+abline( h=272 , lty=1 , lwd=0.5 )
+mtext( "b ~ dnorm(0,10)" )
+xbar <- mean(d2$weight)
+for ( i in 1:N ) 
+  curve( a[i] + b[i]*(x - xbar) ,
+         from=min(d2$weight) , to=max(d2$weight) , 
+         add=TRUE , col=col.alpha("black",0.2) )
+
 ```
 
 
 ```{r}
-alpha <- rnorm(n = 1000, mean = 150, sd = 15) # maybe decrease the mean a bit (and sd)
-beta <- rlnorm(n = 1000, mean = 0, sd = 1)
-#summary(log(d$weight))
-weights <- seq(from = 1.4, to = 4.1, length.out = 1000)
+set.seed(2971)
+d$w <- scale(d$weight)
 
-sample_mu <- alpha + beta * weights
-sample_sigma <- runif(n = 1000, min = 0, max = 20) # shrinking sigma should do it?
-  
-prior_h_poly <- rnorm(1e3, mean = sample_mu, sd = sample_sigma)
-#dens(prior_h_poly)
+N <- 100 # 100 lines
+#a <- rnorm( N , 141.5 , 10 )
+#b <- rnorm( N , 30.5 , 3 )
+#b2 <- rnorm(N, -7.625, 2) # height grows "upside down parabola-like as weight increases"
 
-plot(weights, prior_h_poly)
-abline(v = 272)
+a <- rexp( N , 1) # when weight is 0, height is 20 cm
+b <- rnorm( N , 20 , 5 )
+b2 <- rnorm(N, 3, 1)
+#b3 <- rnorm(N, 0, .1) # why are we getting rid of b3, because it makes it that much harder right?
 ```
+
+```{r}
+plot( NULL , xlim=range(d$w) , ylim=c(-100,400) ,
+xlab="weight" , ylab="height" )
+abline( h=0 , lty=2 )
+abline( h=272 , lty=1 , lwd=0.5 )
+mtext( "curve = a[i] + b[i]*(x+3) +b2[i]*(x+3)^2" )
+
+
+for ( i in 1:N ) 
+  curve( a[i] + b[i]*(x+3) +b2[i]*(x+3)^2,
+         from=min(d$w) , to=max(d$w) , 
+         add=TRUE , col=col.alpha("black",0.2) )
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
