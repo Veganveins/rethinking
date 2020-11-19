@@ -1,0 +1,265 @@
+---
+title: "Chapter 5 Cliffnotes"
+output: pdf_document
+---
+
+```{r}
+library(rethinking)
+data("WaffleDivorce")
+d <- WaffleDivorce
+
+d$A <- scale(d$MedianAgeMarriage)
+d$D <- scale(d$Divorce)
+```
+
+We can model the divorce frequency as a normal model. Since the outcome (divorce) and predictor (age at marriage) are both standardized, _the intercept alpha should end up very close to 0._
+
+```{r}
+# likelihood : D = Normal(mu, sigma)
+# linear model: mu = alpha + beta_A * A (marriage age)
+# alpha prior = Normal(0, .2)
+# beta_a prior: normal(0, .5)
+# sigma: exponential(1)
+```
+
+```{r}
+sd(d$MedianAgeMarriage)
+```
+
+When beta_A = 1, a change of 1.2 years in median age at marriage is associate with a full standard deviation change in the outcome variable.
+
+```{r}
+flist <- alist(D ~ dnorm(mu, sigma),
+               mu ~ alpha + beta_A * A,
+               alpha ~ dnorm(0, .2),
+               beta_A ~ dnorm(0, .5),
+               sigma ~ dexp(1))
+
+m5.1 <- quap(flist, data = d)
+
+```
+
+Simulate a posterior from these priors:
+
+```{r}
+# i am not really sure what extract.prior is doing
+prior <- extract.prior(m5.1, n = 10000)
+
+# no idea what this is doing
+mu <- link(m5.1, post = prior, data=list( A=c(-2,2) ) )
+
+plot( NULL , xlim=c(-2,2) , ylim=c(-2,2) )
+for ( i in 1:50 ) lines( c(-2,2) , mu[i,] , col=col.alpha("black",0.4) )
+```
+Plausible regression lines implied by the priors in m5.1. These are weakly informative priors in that they allow some implusibly strong relationships but generally bound the lines to possible ranges of the variables.
+
+Now for the posterior predictions. Link, summarize with mean and PI, then plot.
+
+```{r}
+
+standardized_marriage_ages = seq(from = -2.2, to = 3, length.out = 1000)
+bunch_of_mus = link(m5.1, data = list(A = standardized_marriage_ages))
+
+average_mu_per_age = apply(bunch_of_mus, 2, mean)
+
+# uncerntainty in mu
+mu_uncertainty = apply(bunch_of_mus, 2, PI, prob = .89)
+
+# simulate divorce
+sim.divorce = sim(m5.1, data = list(A = standardized_marriage_ages, n = 1000))
+
+# calculate 89% interval of divorce
+divorce.pi = apply(sim.divorce, 2, PI, prob = .89)
+```
+Plot.
+```{r}
+plot(d$A, d$D, xlab = 'Age at Marriage', ylab = 'Divorce Index')
+lines(standardized_marriage_ages, average_mu_per_age)
+shade(mu_uncertainty, standardized_marriage_ages, col = col.alpha('blue',  .2))
+shade(divorce.pi, standardized_marriage_ages, col = col.alpha('red',  .1))
+
+
+```
+
+```{r}
+
+precis(m5.1)
+```
+# Predictor residual plots
+
+```{r}
+# approximate the posterior
+flist = alist(MedianAgeMarriage ~ dnorm(mu, sigma),
+              mu ~ alpha + beta_A,
+              alpha ~ dnorm(0, .2),
+              beta_A ~ dnorm(0, .5),
+              sigma ~ dexp(1))
+
+model_r = quap(flist, data = d)
+
+```
+
+## Compute residuals by subtracting the observed marriage rates, from our model's predicted rates.
+
+```{r}
+# sample 1,000 average values for "median age marriage" using the model
+# call link without specifying new data
+# so it uses the original data
+bunch_of_mus <- link(model_r)
+
+# calculate the mean of those average mu's for each median age of marriage
+mu_mean <- apply(bunch_of_mus , 2 , mean )
+
+# subtract the average mu's for each median age *from each median age
+mu_resid <- d$MedianAgeMarriage - mu_mean
+```
+
+# Posterior Prediction plots
+```{r}
+# define multi-variate regression model
+model <- quap(
+alist(
+  D ~ dnorm( mu , sigma ) ,
+mu <- a + bM*MedianAgeMarriage + bA*A ,
+a ~ dnorm( 0 , 0.2 ) ,
+bM ~ dnorm( 0 , 0.5 ) ,
+bA ~ dnorm( 0 , 0.5 ) ,
+sigma ~ dexp( 1 )
+) , data = d )
+# sample 1,000 average values for "median age marriage" using the model
+# call link without specifying new data
+# so it uses the original data
+bunch_of_mus <- link(model)
+
+# calculate the mean of those average mu's for each median age of marriage
+mu_mean <- apply( bunch_of_mus , 2 , mean )
+mu_PI <- apply(bunch_of_mus, 2, PI)
+
+# simulate observations
+# no new data, so uses original data
+divorce_sim = sim(model, n = 1e4)
+divorce_PI = apply(divorce_sim, 2, PI)
+```
+
+Plot predictions against actual values. We should probably be doing cross validation here!
+
+```{r}
+plot( mu_mean ~ d$D , col=rangi2 , ylim=range(mu_PI) ,
+xlab="Observed divorce" , ylab="Predicted divorce" )
+abline( a=0 , b=1 , lty=2 )
+for ( i in 1:nrow(d) ) lines( rep(d$D[i],2) , mu_PI[,i] , col=rangi2 )
+# identify( x=d$D , y=mu_mean , labels=d$Loc ) -> identifies points, wow!!
+```
+
+# 5.2 Masked Relationships
+
+```{r}
+library(rethinking)
+data(milk)
+d <- milk
+
+d$K <- scale( d$kcal.per.g )
+d$N <- scale( d$neocortex.perc )
+d$M <- scale( log(d$mass) )
+
+# remove missing values
+dcc <- d[ complete.cases(d$K,d$N,d$M) , ]
+```
+
+Set some initial priors:
+```{r}
+flist <- alist(K ~ dnorm( mu , sigma ) ,
+            mu <- a + bN*N ,
+            a ~ dnorm( 0 , 1 ) ,
+            bN ~ dnorm( 0 , 1 ) ,
+            sigma ~ dexp( 1 )
+) 
+
+model <- quap(flist, dcc)
+```
+
+Check if the priors seem crazy: I do not understand why this code works...
+```{r}
+prior <- extract.prior( model ) # a bunch of values for alpha, beta, and sigma
+#brain_sizes = seq(from = min(dcc$N), to = max(dcc$N), length.out = 1000)
+brain_sizes = c(-2,2) 
+avg_calories <- link(model, post = prior, data = list(N = brain_sizes))
+
+plot( NULL , xlim=brain_sizes , ylim=brain_sizes )
+for ( i in 1:50 ) lines( brain_sizes , avg_calories[i,] , col=col.alpha("black",0.3) )
+```
+
+```{r}
+flist = alist(K ~ dnorm(mu, sigma),
+              mu ~ a +bn*N + bm*M,
+              a ~ dnorm(0, .2),
+              bn ~ dnorm(0, .5),
+              bm ~ dnorm(0, .5),
+              sigma ~ dexp(1))
+
+model <- quap(flist, dcc)
+precis(model)
+```
+```{r}
+flist = alist(K ~ dnorm(mu, sigma),
+              mu ~ a + bm*M,
+              a ~ dnorm(0, .2),
+              
+              bm ~ dnorm(0, .5),
+              sigma ~ dexp(1))
+
+mass_model <- quap(flist, dcc)
+precis(mass_model)
+```
+
+
+```{r}
+flist = alist(K ~ dnorm(mu, sigma),
+              mu ~ a +bn*N ,
+              a ~ dnorm(0, .2),
+              bn ~ dnorm(0, .5),
+              
+              sigma ~ dexp(1))
+
+cortex_model <- quap(flist, dcc)
+precis(cortex_model)
+```
+# Counterfactual plots
+
+```{r}
+xseq <- seq( from=min(dcc$M)-0.15 , to=max(dcc$M)+0.15 , length.out=30 )
+mu <- link( model , data=data.frame( M=xseq , N=0 ) )
+mu_mean <- apply(mu,2,mean)
+mu_PI <- apply(mu,2,PI)
+plot( NULL , xlim=range(dcc$M) , 
+      ylim=range(dcc$K) , 
+      xlab = 'Neocorex % (std)',
+      ylab = 'Milk Richness (std)')
+lines( xseq , mu_mean , lwd=2 )
+shade( mu_PI , xseq )
+```
+
+```{r}
+xseq <- seq( from=min(dcc$N)-0.15 , to=max(dcc$N)+0.15 , length.out=30 )
+mu <- link( model , data=data.frame( N=xseq , M=0 ) )
+mu_mean <- apply(mu,2,mean)
+mu_PI <- apply(mu,2,PI)
+plot( NULL , xlim=range(dcc$N) , 
+      ylim=range(dcc$K) , 
+      xlab = 'Log Body Mass (std)',
+      ylab = 'Milk Richness (std)')
+lines( xseq , mu_mean , lwd=2 )
+shade( mu_PI , xseq )
+```
+
+
+```{r}
+library(dagitty)
+dag5.7 <- dagitty( "dag{
+M -> K <- N
+M -> N }" )
+coordinates(dag5.7) <- list( x=c(M=0,K=1,N=2) , y=c(M=0.5,K=1,N=0.5) )
+MElist <- equivalentDAGs(dag5.7)
+MElist
+```
+

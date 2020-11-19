@@ -1,0 +1,65 @@
+---
+title: "Chapter 6 Solutions"
+output: pdf_document
+---
+
+# 6M1. Modify the DAG on page 190 to include the variable V, an unobserved cause of C and Y: C ← V → Y. Reanalyze the DAG. How many paths connect X to Y? Which must be closed? Which variables should you condition on now?
+
+To add v, you include it in the path C -> Y as C <- V -> Y. Now there are still (3) paths from X to Y:
+
+(D) X -> Y
+(1) X <- U <- A -> C <- V -> Y
+(2) X <- U -> B <- C <- V -> Y
+
+The variables to condition on to close path (1) are A and V.To close path (2) we need variables C or V. We don't want to condition on C because it is a collider in path (1), so we should condition on V.
+
+# 6H1: Use the Waffle House data, data(WaffleDivorce), to find the total causal influence of number of Waffle Houses on divorce rate. Justify your model or models with a causal graph.
+```{r}
+library(rethinking)
+data(WaffleDivorce)
+d <- WaffleDivorce
+head(d)
+
+```
+Using the dag from earlier in the chapter, we learned that conditioning on "South" should break the path from wafflehouses to divorce.
+```{r}
+flist <- alist(Divorce ~ dnorm(mu, sigma),
+               mu <- alpha + b1*South + b2*WaffleHouses,
+               alpha ~ dnorm(0),
+               b1 ~ dnorm(10, 5),
+               b2 ~ dnorm(0, 1),
+               sigma ~ dnorm(2,1))
+
+model <- quap(flist, data = d)
+precis(model)
+```
+The true causal effect of waffle houses on divorce rate is 0. The causal graph is something like W <- S -> D.
+
+# 6H2. Build a series of models to test the implied conditional independencies of the causal graph you used in the previous problem. If any of the tests fail, how do you think the graph needs to be amended? Does the graph need more or fewer arrows? Feel free to nominate variables that aren’t in the data.
+
+```{r}
+# build a model with only waffles
+flist <- alist(Divorce ~ dnorm(mu, sigma),
+               mu <- alpha + b2*WaffleHouses,
+               alpha ~ dnorm(0),
+               b2 ~ dnorm(0, 1),
+               sigma ~ dnorm(2,1))
+
+model <- quap(flist, data = d)
+precis(model)
+```
+I would have expected this to show that waffle houses have a stronger effect because the unobserved south should show up in the coefficient for waffles, since there is a path from W to D through S in my DAG. This test failed. I should probably amend the dag to include variables A (age at marriage) and M (marriage rate) somehow.
+
+```{r}
+
+# build a model with only "south", expect this to show a positive effect of b1 of about 2
+flist <- alist(Divorce ~ dnorm(mu, sigma),
+               mu <- alpha + b1*South,
+               alpha ~ dnorm(0),
+               b1 ~ dnorm(10, 5),
+               sigma ~ dnorm(2,1))
+
+model <- quap(flist, data = d)
+precis(model)
+```
+This test passed. South still has about the expected effect without accounting for waffles.

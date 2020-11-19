@@ -414,7 +414,7 @@ N <- 100 # 100 lines
 #b <- rnorm( N , 30.5 , 3 )
 #b2 <- rnorm(N, -7.625, 2) # height grows "upside down parabola-like as weight increases"
 
-a <- rexp( N , 1) # when weight is 0, height is 20 cm
+a <- rnorm( N , .86, .81) # when weight is 0, height is 20 cm
 b <- rnorm( N , 20 , 5 )
 b2 <- rnorm(N, 3, 1)
 #b3 <- rnorm(N, 0, .1) # why are we getting rid of b3, because it makes it that much harder right?

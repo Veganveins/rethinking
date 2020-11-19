@@ -1,0 +1,277 @@
+---
+title: "chapter6 notes"
+output: pdf_document
+---
+
+## 6.1.1 Multicollinear Legs
+```{r}
+library(rethinking)
+N <- 100 # number of individuals
+set.seed(909)
+height <- rnorm(N,10,2) # sim total height of each
+leg_prop <- runif(N,0.4,0.5) # leg as proportion of height
+leg_left <- leg_prop*height + # sim left leg as proportion + error
+rnorm( N , 0 , 0.02 )
+leg_right <- leg_prop*height + # sim right leg as proportion + error
+rnorm( N , 0 , 0.02 )
+# combine into data frame
+d <- data.frame(height,leg_left,leg_right)
+
+m6.1 <- quap(
+alist(
+height ~ dnorm( mu , sigma ) ,
+mu <- a + bl*leg_left + br*leg_right ,
+a ~ dnorm( 10 , 100 ) ,
+bl ~ dnorm( 2 , 10 ) ,
+br ~ dnorm( 2 , 10 ) ,
+sigma ~ dexp( 1 )
+) ,
+data=d )
+precis(m6.1)
+```
+
+
+```{r}
+plot(precis(m6.1))
+```
+
+It did work correctly, and the posterior distribution here is the right answer to the question we asked. The problem is the question. Recall that a multiple linear regression answers
+the question: What is the value of knowing each predictor, after already knowing all of the other predictors? So in this case, the question becomes: What is the value of knowing each
+leg’s length, after already knowing the other leg’s length?
+
+```{r}
+post <- extract.samples(m6.1)
+plot( bl ~ br , post , col=col.alpha(rangi2,0.1) , pch=16 )
+```
+
+When bl is large (aka, left leg length is valuable to the model), the br must be small (aka, right leg length is not valuable to the model.)
+
+
+```{r}
+sum_blbr <- post$bl + post$br
+dens( sum_blbr , col=rangi2 , lwd=2 , xlab="sum of bl and br" )
+```
+
+If you fit a regression with only one of
+the leg length variables, you’ll get approximately the same posterior mean:
+```{r}
+m6.2 <- quap(
+alist(
+height ~ dnorm( mu , sigma ) ,
+mu <- a + bl*leg_left,
+a ~ dnorm( 10 , 100 ) ,
+bl ~ dnorm( 2 , 10 ) ,
+sigma ~ dexp( 1 )
+) ,
+data=d )
+precis(m6.2)
+```
+
+That 1.99 is almost identical to the mean value of sum_blbr.
+
+## 6.1.1 Multicollinear Milk
+
+This leg example is clear and cute. But it is also purely statistical. In the leg length example, it’s easy to see that including both legs in the model is a little silly. But the problem that arises in real data sets is that we may not
+anticipate a clash between highly correlated predictors. And therefore we may mistakenly read the posterior distribution to say that neither predictor is important. In this section, we
+look at an example of this issue with real data.
+
+```{r}
+data(milk)
+d <- milk
+d$K <- scale( d$kcal.per.g )
+d$F <- scale( d$perc.fat )
+d$L <- scale( d$perc.lactose )
+```
+
+Start by modeling kcal.per.g as a function of perc.fat and perc.lactose, but in two bivariate regressions.
+
+```{r}
+flist <- alist(K ~ dnorm(mu, sigma),
+               mu ~ alpha + beta * F,
+               alpha ~ dnorm(-1, 1),
+               beta ~ dnorm(.5, .5),
+               sigma ~ dnorm(1, 1))
+
+fat_model <- quap(flist, d)
+
+
+flist <- alist(K ~ dnorm(mu, sigma),
+               mu ~ alpha + beta * L,
+               alpha ~ dnorm(-1, 1),
+               beta ~ dnorm(.5, .5),
+               sigma ~ dnorm(1,1))
+
+lac_model <- quap(flist, d)
+```
+
+```{r}
+precis(fat_model)
+```
+
+```{r}
+precis(lac_model)
+```
+
+```{r}
+pairs(d[, c('K', 'F', 'L')])
+
+```
+Percent fat and percent lactose are strongly negatively correlated with one another, providing mostly the same information.
+
+The posterior distributions for bF and bL are essentially mirror images of one another. The posterior mean of bF is as positive as the mean of bL is negative. Both are narrow posterior distributions that lie almost entirely on one side or the other of zero. Given the strong association of each predictor with the outcome, we might conclude that both variables are reliable predictors of total energy in milk, across species. The more fat, the more kilocalories in the
+milk. The more lactose, the fewer kilocalories in milk. But watch what happens when we place both predictor variables in the same regression model:
+
+```{r}
+flist <- alist(K ~ dnorm(mu, sigma),
+               mu ~ alpha + b1 * F + b2 * L,
+               alpha ~ dnorm(-1, 1),
+               b1 ~ dnorm(.5, .5),
+               b2 ~ dnorm(.5, .5),
+               sigma ~ dnorm(1,1))
+
+mlr <- quap(flist, d)
+precis(mlr)
+```
+
+Now the posterior means of both bF and bL are closer to zero. And the standard deviations for both parameters are twice as large as in the bivariate models. What happened?
+
+Because fat and lactose contain similar information, the are almost substitues for one another.  the posterior distribution ends up describing a long ridge of combinations of bF and
+bL that are equally plausible. In the case of the fat and lactose, these two variables form essentially a single axis of variation. The easiest way to see this is to use a pairs plot:
+
+```{r}
+pairs(~ kcal.per.g + perc.fat + perc.lactose, data=d , col=rangi2 )
+```
+
+In the scientific literature, you might encounter a variety of dodgy ways of coping with multicollinearity. Few of them take a causal perspective. Some fields actually teach students to inspect pairwise correlations before fitting a model, to identify and drop highly correlated predictors. This is a mistake. Pairwise correlations are not the problem. It is the conditional associations—not correlations—that matter. And even then, the right thing to do will depend upon what is causing the collinearity. The associations within the data alone are not enough to decide what to do.
+
+
+```{r}
+library(rethinking)
+data(milk)
+d <- milk
+sim.coll <- function( r=0.9 ) {
+d$x <- rnorm( nrow(d) , mean=r*d$perc.fat ,
+sd=sqrt( (1-r^2)*var(d$perc.fat) ) )
+m <- lm( kcal.per.g ~ perc.fat + x , data=d )
+sqrt( diag( vcov(m) ) )[2] # stddev of parameter
+}
+rep.sim.coll <- function( r=0.9 , n=100 ) {
+stddev <- replicate( n , sim.coll(r) )
+mean(stddev)
+}
+r.seq <- seq(from=0,to=0.99,by=0.01)
+stddev <- sapply( r.seq , function(z) rep.sim.coll(r=z,n=100) )
+plot( stddev ~ r.seq , type="l" , col=rangi2, lwd=2 , xlab="correlation" )
+```
+The above function generates correlated predictors, fits a model, and returns the standard deviation of the posterior distribution for the slope relating perc.fat to kcal.per.g. Then the code repeatedly calls this function, with different degrees of correlation as input, and collects the results. So for each correlation value in r.seq, the code generates 100 regressions and returns the average. This code uses implicit flat priors, which are bad priors. So it does exaggerate the effect of collinear variables. When you use informative priors, the inflation in standard deviation can be much slower.
+
+# 6.2 Post Treatment Bias
+
+```{r}
+set.seed(71)
+# number of plants
+N <- 100
+# simulate initial heights
+h0 <- rnorm(N,10,2)
+# assign treatments and simulate fungus and growth
+treatment <- rep( 0:1 , each=N/2 )
+fungus <- rbinom( N , size=1 , prob=0.5 - treatment*0.4 )
+h1 <- h0 + rnorm(N, 5 - 3*fungus)
+# compose a clean data frame
+d <- data.frame( h0=h0 , h1=h1 , treatment=treatment , fungus=fungus )
+precis(d)
+```
+
+Assume that h1 is proportional to h0
+
+```{r}
+sim_p <- rlnorm( 100 , 0 , 0.25 )
+d$prop <- sim_p
+precis( data.frame(sim_p) )
+```
+
+Using this prior, we could expect up to 40% shrinkage to up to 50% growth. 
+
+```{r}
+flist <- alist(h1 ~ dnorm(mu, sigma),
+               mu <- h0 * prop,
+               prop ~ dlnorm(0, .25),
+               sigma ~ dexp(1))
+
+model <- quap(flist, data = d)
+precis(model)
+```
+Now to include the treatment and fungus variables
+
+```{r}
+flist <- alist(h1 ~ dnorm(mu, sigma),
+               mu <- h0 * prop,
+               prop ~ alpha + b1* treatment + b2 * fungus,
+               alpha ~ dnorm(0, 1),
+               b1 ~ dnorm(0,1),
+               b2 ~ dnorm(0, 1), 
+               sigma ~ dexp(1))
+
+model <- quap(flist, d)
+precis(model)
+```
+That a parameter is the same as p before. And it has nearly the same posterior. The marginal posterior for bt, the effect of treatment, is solidly zero, with a tight interval. The treatment is not associated with growth. The fungus seems to have hurt growth, however. Given that we know the treatment matters, because we built the simulation that way, what happened here?
+
+The problem is that fungus is mostly a consequence of treatment. This is to say that fungus is a post-treatment variable. So when we control
+for fungus, the model is implicitly answering the question: Once we already know whether or not a plant developed fungus, does soil treatment matter? The answer is “no,” because soil treatment has its effects on growth through reducing fungus. But we actually want to know, based on the design of the experiment, is the impact of treatment on growth. To measure this properly, we should omit the post-treatment variable fungus. Here’s what the inference looks like in that case:
+
+```{r}
+m6.8 <- quap(
+alist(
+h1 ~ dnorm( mu , sigma ),
+mu <- h0 * p,
+p <- a + bt*treatment,
+a ~ dlnorm( 0 , 0.2 ),
+bt ~ dnorm( 0 , 0.5 ),
+sigma ~ dexp( 1 )
+), data=d )
+precis(m6.8)
+```
+Impact of treatment is now positive, as it should be. 
+
+# 6.3 Collider Bias
+```{r}
+d <- sim_happiness( seed=1977 , N_years=1000 )
+precis(d)
+```
+Scale age variable for adults to create a new variable A
+```{r}
+d2 <- d[ d$age>17 , ] # only adults
+d2$A <- ( d2$age - 18 ) / ( 65 - 18 )
+```
+
+## Haunted Dags
+```{r}
+N <- 200 # number of grandparent-parent-child triads
+b_GP <- 1 # direct effect of G on P
+b_GC <- 0 # direct effect of G on C
+b_PC <- 1 # direct effect of P on C
+b_U <- 2 # direct effect of U on P and C
+
+
+set.seed(1)
+U <- 2*rbern( N , 0.5 ) - 1
+G <- rnorm( N , mean = 0, sd = 1)
+
+P <- rnorm( N , b_GP*G + b_U*U )
+C <- rnorm( N , b_PC*P + b_GC*G + b_U*U )
+d <- data.frame( C=C , P=P , G=G , U=U )
+```
+
+
+```{r}
+m6.11 <- quap(
+alist(
+C ~ dnorm( mu , sigma ),
+mu <- a + b_PC*P + b_GC*G,
+a ~ dnorm( 0 , 1 ),
+c(b_PC,b_GC) ~ dnorm( 0 , 1 ),
+sigma ~ dexp( 1 )
+), data=d )
+precis(m6.11)
+```
