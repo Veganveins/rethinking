@@ -2,16 +2,119 @@
 title: "Chapter 6 Solutions"
 output: pdf_document
 ---
+https://rpubs.com/Thousandslayers/677948
+
+# 6E1. List three mechanisms by which multiple regression can produce false inferences about causal effects
+
+The three mechanisms discussed in the chapter are multi-collinearity, post-treatment bias, and collider bias. Multi-collinearity manifests via the "multi-leg" problem -- if you use both legs to predict height, the coefficient on one of the legs will be almost 0. Post-treatment bias is similar to including future observations into the training set -- you are including information that comes after the test is run, which the model wouldn't have access to at prediction time. Collider bias occurs when a variable is included in a model --called a collider, which creates the illusion of a causal effect when there really is not one.
+
+# 6E2. Provide an example
+Multi-collinearity: You want to predict sales price of a car. If you use the age of the car and its mileage, the effect of each will be smaller when they are both included compared to if you just used one of them to predict sale price. Essentially, if you want to know the causal effect of one variable on another, then you should make sure they aren't collinear. But if you just fit an outcome to one variable, then you can be tripped up by masked relationships
+```{r}
+library(data.table)
+age <- rep(c(2,5,6,10),1000)
+mileage <- rep(c(40000, 75000, 180000, 60000),1000)
+price <- rep(c(20000, 14000, 11000, 8000),1000)
+df = data.table(age = age, price = price, mileage = mileage)
+
+# -3.36e-02, mileage
+# -1488, age
+# -2.2e02*mileage + -1425*age
+lm(price ~ mileage, data = df)
+```
+
+Post Treatment Bias: Suppose you randomly split a group of people into two groups: one to eat vegetarian for a month and one to eat paleo for a month. You went to test the effect of a treatment (no meat) on blood pressure. You measure the baseline blood pressure of both groups and the baseline weight of both groups before you start the dietary regimen. After a month is over, you re-measure blood pressure and re-weight the participants.
+
+If you now want to build a model to predict the change in height, you can't use the change in weight as a variable because it is a post-treatment effect. Weightloss is mostly a consequence of diet -- once we already know if there was weightloss, does the diet matter? If the diet already has its effects on blood pressure by reducing weight. Correct inference for the reason that blood pressure dropped is from the diet, the weight loss wouldn't have occurred without the diet. (Weight loss doesn't cause diet).
+
+Collider Bias: Lung cancer, smoking, and coffee. If you want to know the causal effect of drinking coffee on cancer, "smoking" would be an example of a collider. Coffee and smoking are both addictive substances, so people who drink coffee may be more likely to smoke. So if you condition on smoking, then it may appear that coffee has a positive effect on lung cancer, even though in reality it has none.
+
+
+# 6E3. List the four elemental confounds
+
+Fork: X <- Z -> Y. X and Y are independent, conditional on Z
+Pipe: X -> Z -> Y. X and Y are independent, conditional on Z
+Collider: X -> Z <- Y. No association between X and Y, unless condition on Z.
+Descendant: Condition on a descendent of Z in the pipe will weakly close the pipe
+
+# 6E4. How is a biased sample like conditioning on a collider? Think of the example at the opening of the chapter
+
+The biased sample was the newsworthy/trustworthy thing. Newsworthy -> Acceptance <- Trustworthy. Selection bias is like collider bias?
 
 # 6M1. Modify the DAG on page 190 to include the variable V, an unobserved cause of C and Y: C ← V → Y. Reanalyze the DAG. How many paths connect X to Y? Which must be closed? Which variables should you condition on now?
 
-To add v, you include it in the path C -> Y as C <- V -> Y. Now there are still (3) paths from X to Y:
+To add v, you include it in the path C -> Y as C <- V -> Y. Now there are (5) paths from X to Y:
 
 (D) X -> Y
-(1) X <- U <- A -> C <- V -> Y
-(2) X <- U -> B <- C <- V -> Y
+(1) X <- U <- A -> C <- V -> Y (C is a collider)
+(2) X <- U <- A -> C <- Y (C is a collider)
+(3) X <- U -> B <- C <- V -> Y (B is a collider)
+(4) X <- U -> B <- C <- Y (B is a collider)
 
-The variables to condition on to close path (1) are A and V.To close path (2) we need variables C or V. We don't want to condition on C because it is a collider in path (1), so we should condition on V.
+C and B are both colliders, so we can only consider variables A and V. The reason we choose to shut down variable A is...
+
+#6M2. What matters is conditional association -- how is variable X associated with Y, conditional on Z? Consider a DAG X -> Z -> Y. Simulate data from this DAG so cor(X, Z) is large. Then include both in a model predicting Y. Do you observe multi-collinearity? What is the difference from the legs example?
+
+```{r}
+x <- sort(rnorm(100, 5, 1))
+z <- sort(rnorm(100, 5, 1))
+cor(x, z)
+```
+
+```{r}
+library(rethinking)
+y <- rnorm(100, 10, 2)
+d <- data.table(x = x, y = y, z= z)
+
+flist <- alist(y ~ dnorm(mu, sigma),
+      mu <- alpha + b1*x + b2*z,
+      alpha ~ dnorm(0,1), 
+      b1 ~ dnorm(0,1), 
+      b2 ~ dnorm(0,1), 
+      sigma ~ dunif(0,10))
+
+mod <- quap(flist, d)
+precis(mod)
+```
+
+We do have multi-collinarity because the model thinks x is important but z is not, even thought they are basically the same information.
+
+```{r}
+flist <- alist(y ~ dnorm(mu, sigma),
+      mu <- alpha + b2*z,
+      alpha ~ dnorm(0,1), 
+      b2 ~ dnorm(0,1), 
+      sigma ~ dunif(0,10))
+
+mod <- quap(flist, d)
+precis(mod)
+```
+This seems very similar to the legs example. The key difference is that in the legs example, leg length was highly correlated with height. In this example, x and z are not necessarily correlated with y.
+
+# 6M3. 
+
+a) Three paths from X to Y, you should condition on Z
+X -> Y
+X <- Z <- A -> Y (pipe)
+X <- Z -> Y (fork)
+
+b) Three paths from X to Y, Z is a collider. You should condition on A.
+
+X -> Y
+X -> Z <- A -> Y (descendant)
+X <- Z -> Y (fork)
+
+c) No open backdoor path from X to Y (the path through A goes through the collider)
+
+X -> Y
+X -> Z <- Y
+X <- A -> Z <- Y
+
+d) A is a collider. You should condition on Z.
+
+X to Y
+X -> Z -> Y
+X <-A -> Z -> Y
 
 # 6H1: Use the Waffle House data, data(WaffleDivorce), to find the total causal influence of number of Waffle Houses on divorce rate. Justify your model or models with a causal graph.
 ```{r}
@@ -22,6 +125,28 @@ head(d)
 
 ```
 Using the dag from earlier in the chapter, we learned that conditioning on "South" should break the path from wafflehouses to divorce.
+```{r}
+d2 = d[, c('Population', 'MedianAgeMarriage', 'Marriage', 'WaffleHouses', 'South', 'Slaves1860', 'Population1860', 'PropSlaves1860')]
+pc = prcomp(d2, scale = TRUE)
+pc$rotation
+```
+
+```{r}
+summary(pc)
+```
+PC1 explains 43%, PC2 explains 27%. PC 1 is mainly South + WaffleHouses + Slaves1860 + PropSlaves1860, PC2 is mainly marriage and age at marriage. PC 3 is population.
+
+```{r}
+lm(Divorce ~ South, data = d)$coef
+```
+```{r}
+lm(Divorce ~ South + WaffleHouses, data = d)$coef
+```
+```{r}
+lm(Divorce ~ WaffleHouses, data = d)$coef
+```
+
+
 ```{r}
 flist <- alist(Divorce ~ dnorm(mu, sigma),
                mu <- alpha + b1*South + b2*WaffleHouses,
@@ -63,3 +188,89 @@ model <- quap(flist, data = d)
 precis(model)
 ```
 This test passed. South still has about the expected effect without accounting for waffles.
+
+# 6H3. Prior Predictive simulation of model using area to predict fox weight, and eventual model predictions.
+
+```{r}
+library(rethinking)
+data(foxes)
+d <- foxes
+N <- 1000
+a <- rnorm(N, 4,.5)
+b1 <- rlnorm(N, 0,.01)
+sigma <- runif(N, 1,1.01)
+area <- sample(d$area, 100)
+
+prior_h <- rnorm( 1e4 , a + b1*area , sigma )
+dens( prior_h )
+
+```
+
+```{r}
+plot( NULL , xlim=range(d$area) , ylim=c(-10,20) ,
+xlab="area" , ylab="height" )
+abline( h=0 , lty=2 )
+abline( h=8 , lty=1 , lwd=0.5 )
+mtext( "b ~ dnorm(0,10)" )
+xbar <- mean(d$weight)
+for ( i in 1:N ) curve( a[i] + b1[i]*(x - xbar) ,
+from=min(d$area) , to=max(d$area) , add=TRUE ,
+col=col.alpha("black",0.2) )
+```
+
+
+
+```{r}
+library(dplyr)
+flist <- alist(weight ~ dnorm(mu, sigma),
+               mu ~ alpha + b1 * area,
+               alpha ~ dnorm(0, .2),
+               b1 ~ dlnorm(0, .5),
+               sigma ~ dexp(1))
+
+foxes_scaled <- foxes %>% mutate(avgfood = (avgfood - mean(avgfood)) / sd(avgfood),
+                                 groupsize = (groupsize - mean(groupsize)) / sd(groupsize),
+                                 area = (area - mean(area)) / sd(area),
+                                 weight = (weight - mean(weight)) / sd(weight)
+                                 )
+
+mod <- quap(flist, foxes_scaled)
+precis(mod)
+```
+Increasing area should make foxes heavier, according to this coefficient 89% CI of 1. Should show though that there is no causal relationship between area and weight...
+
+# 6H4. Now infer the causal impact of adding food to a territory. Would this make foxes heavier? Which covariate do you need to adjust for to estimate the total causal influence of food?
+
+Given our DAG, there are two paths from avgfood to weight. However, none of them are a backdoor. Thus, we do not need to adjust for any other variable to identify the causal effect of avgfood on weight.
+```{r}
+flist <- alist(weight ~ dnorm(mu, sigma),
+               mu ~ alpha + b1 * area + b2*avgfood,
+               alpha ~ dnorm(5,.5),
+               b1 ~ dlnorm(0,.01),
+               b2 ~ dlnorm(0, .05),
+               sigma ~ dunif(1,2))
+
+#alpha ~ dnorm(0,1),
+#b1 ~ dnorm(0,1),
+#sigma ~ dunif(0,10))
+
+mod <- quap(flist, d)
+precis(mod)
+```
+Food makes foxes heavier. You need to adjust for groupsize. Should show though that food, on its own has no causal realtionship with weight.
+
+# 6H5. Now infer the causal impact of group size. Which covariates do you need to adjust for? Looking at the posterior distribution of the resulting model, what do you think explains these data? That is, can you explain the estimates for all three problems? How do they go together?
+
+Given our DAG, there are two paths from groupsize to weight. And of them has a backdoor through which our estimates will be confounded. That is, given that in our bayesian network the information flows freely, if we run an univariate regression, the coefficient for groupsize will pick up the effect of avgfood on weight too. Therefore, we need to control for avgfood to close this backdoor.
+
+* Conditioning on groupsize, the average food available increases the weight of the foxes
+
+* The larger the groupsize, adjusting for avgfood, the lower the weight of the foxes.
+
+* Avgfood and area have two causal channels through which it influences the foxes’ weight. It increases the food available to them, which helps them get heavier. But it also increases the groupsize. Thus, they get thinner. These effects in opposite directions end up cancelling the overall causal effect of area or avgdfood on weight.
+
+*If one were to intervene to increase the foxes’ weight, one would need to increase the avgfood available to them while maintaining the groupsize constant.
+
+# 6H6. Come back to this one...
+
+# 6H7. Come back to this one...
