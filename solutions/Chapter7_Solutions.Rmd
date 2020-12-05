@@ -1,0 +1,330 @@
+---
+title: "Chapter 7 Solutions"
+output: pdf_document
+---
+
+# Easy.
+
+### 1. State the three motivating criteria that define information entropy.
+
+a) continuous -- a small change in probabilities should not precipitate a massive (step-wise) change in uncertainty
+
+a) "increasing" -- when more events are possible there is inherently more uncertainty in the system
+
+b) additive -- different ways of combining events in a system should all add up to the same thing
+
+### 2. Suppose a coin is weighted such that, when it is tossed and lands on a table, it comes up heads 70% of the time. What is the entropy 
+```{r}
+p <- c(.7, .3)
+-sum(p*log(p))
+```
+
+### 3. Suppose a four-sided die is loaded such that, when tossed onto a table, it shows '1' 20%, '2' 25%, '3' 25%, and '4' 30% of the time. What is the entropy of this die?
+```{r}
+p <- c(.2, .25, .25, .3)
+-sum(p*log(p))
+```
+
+### 4. Suppose another four-sided die is loaded such that it never shows '4'. The other three sides show equally often. What is the entropy of this die?
+
+```{r}
+p <- c(.33, .33, .33)
+-sum(p*log(p))
+```
+
+# Medium
+
+### 1. Write down and compare the definitions of AIC and WAIC. Which of these criteria is most general? Which assumptions are required to transform the more general criterion into a less general one?
+
+AIC = D_train + 2p = -2lppd + 2p
+WAIC(y,o) = -2(lppd - sum(var(o)* log(p(y|o)))) 
+
+WAIC is most general because it makes no assumption about the shape of the posterior. To transform WAIC into AIC, you would need the following two assumptions: 
+* Priors are flat or overwhelmed by the likelihood
+* The posterior distribution is approximately multivariate Gaussian
+
+### 2. Model selection vs model comparison.
+
+Model comparison evaluates different models across certain criteria. Model selection chooses the best performing model and discards the rest. Under model selection, you lose the information from all of the other models.
+
+### 3. When comparing models with an information criterion, why must all models be fit to exactly the same observations? What would happen to the information criterion values, if the models were fit to different numbers of observations? Perform some experiments, if you are not sure.
+
+Since information criteria is increasing, then one model could be fit to less data (and therefore less uncertainty), or one model could "get lucky" and be fit to "easier data" which would make it appear to be the best performing. 
+
+### 4. What happens to the effective number of parameters, as measured by PSIS or WAIC, as a prior becomes more concentrated? Why? 
+
+```{r}
+x <-  rnorm(100, mean=1, sd=2)
+x1 <- rnorm(100, mean=0, sd=1)            # not associated with outcome
+x2 <- rnorm(100, mean=x, sd=2)            # spurious assocation
+y <- rnorm(100, mean = 2 + 2.4*x, sd=2)
+d <- data.frame( y=y, x=x, x1=x1, x2=x2)
+pairs(d)
+```
+
+```{r}
+
+wide_prior <- alist(y ~ dnorm(mu, sigma),
+                    mu ~ a + b*x + c*x + e*x,
+                    c(b,c,e) ~ dnorm(0,10),
+                    a ~ dnorm(0,5),
+                    sigma ~ dunif(0,20))
+
+tight_prior <- alist(y ~ dnorm(mu, sigma),
+                    mu ~ a + b*x + c*x + e*x,
+                    c(b,c,e) ~ dnorm(0,4),
+                    a ~ dnorm(0,2),
+                    sigma ~ dunif(0,2))
+
+wide_mod <- quap(wide_prior, d)
+tight_mod <- quap(tight_prior, d)
+```
+
+```{r}
+library(rethinking)
+WAIC(wide_mod)
+WAIC(tight_mod)
+```
+
+As priors become more concentrated...? i think WAIC should decrease but I should come back to this one. Having a hard time showing it
+
+### 5. Provide an informal explanation of why informative priors reduce overfitting.
+
+Informative priors are a kind of regularization that prevents the model from "going to far." They can only reach within the bounds of the informative priors so they won't be able to fit the data as closely as a prior that allows the model a "longer leash"
+
+### 6. Provide an informal explanation of why overly informative priors result in underfitting.
+
+If the leash is too short though, then the opposite problem can occur in which case your model won't be able to discover anything about the parameters.
+
+# Hard
+
+# 1. I want you to actually fit a curve to these data, found in data(Laffer). Consider models that use tax rate to predict tax revenue. Compare, using WAIC or PSIS, a straight-line model to any curved models you like. What do you conclude about the relationship between tax rate and tax revenue?
+
+```{r}
+data(Laffer)
+d <- Laffer
+head(d)
+```
+
+Fit a straight line model first.
+```{r}
+flist <- alist(tax_revenue ~ dnorm(mu, sigma),
+               mu <- a + b*tax_rate,
+               a ~ dnorm(-5, 5),
+               b ~ dnorm(1, .3),
+               sigma ~ dunif(0,5))
+
+straight_line_model <- quap(flist, d)
+precis(straight_line_model)
+```
+```{r}
+WAIC(straight_line_model)
+```
+
+Fit curved model.
+
+```{r}
+flist <- alist(tax_revenue ~ dnorm(mu, sigma),
+               mu <- a + b*tax_rate + b2* tax_rate^2,
+               a ~ dnorm(-5, 5),
+               b ~ dnorm(1, .3),
+               b2 ~ dnorm(0,2),
+               sigma ~ dunif(0,5))
+
+curved_model <- quap(flist, d)
+precis(curved_model)
+```
+```{r}
+WAIC(curved_model)
+```
+
+
+```{r}
+set.seed(24071847)
+PSIS_cm <- PSIS(curved_model,pointwise=TRUE)
+set.seed(24071847)
+WAIC_cm <- WAIC(curved_model,pointwise=TRUE)
+plot( PSIS_cm$k , WAIC_cm$penalty , xlab="PSIS Pareto k" ,
+ylab="WAIC penalty" , col=rangi2 , lwd=2 )
+```
+
+### 2. In the Laffer data, there is one country with a high tax revenue that is an outlier. Use PSIS and WAIC to measure the importance of this outlier in the models you fit in the previous problem. Then use robust regression with a Student’s t distribution to revisit the curve fitting problem. How much does a curved relationship depend upon the outlier point?
+```{r}
+flist <- alist(tax_revenue ~ dstudent(2, mu, sigma),
+               mu <- a + b*tax_rate + b2* tax_rate^2,
+               a ~ dnorm(-5, 5),
+               b ~ dnorm(1, .3),
+               b2 ~ dnorm(0,2),
+               sigma ~ dunif(0,5))
+
+curved_model2 <- quap(flist, d)
+precis(curved_model2)
+```
+
+```{r}
+PSIS(curved_model2)
+```
+
+### 7H3. First, compute the entropy of each island’s bird distribution. Interpret these entropy values.
+```{r}
+isl1 <- c(.2, .2, .2, .2, .2)
+isl2 <- c(.8, .1, .05, .025, .025)
+isl3 <- c(.05, .15, .7, .05, .05)
+
+e1 <- -sum(isl1*log(isl1))
+e2 <- -sum(isl2*log(isl2))
+e3 <- -sum(isl3*log(isl3))
+```
+
+```{r}
+e1
+```
+```{r}
+e2
+```
+```{r}
+e3
+```
+
+Island 1 has the most entropy because you're the most uncertain about what birds you will find there. Island 2 has the least entropy because your least uncertain about what birds you'll find there (mostly Species A). Island 3 is in the middle.
+
+### Use each island's bird distribution to predict the other two. This means compute the K-L Divergence of each island from the others, treating each island as if it were a statistical model of the other islands. You should end up with 6 different K-L Divergence values. Which island predicts the others best. Why?
+
+Recall that divergence is the additional uncertainty induced by using probabilities from
+one distribution to describe another distribution.
+
+```{r}
+kl_1_from2 <- sum(isl1*(log(isl1/isl2)))
+kl_1_from3 <- sum(isl1*(log(isl1/isl3)))
+
+kl_2from1 <- sum(isl2*(log(isl2/isl1)))
+kl_2from3 <- sum(isl2*(log(isl2/isl3)))
+
+kl_3from1 <- sum(isl3*(log(isl3/isl1)))
+kl_3from2 <- sum(isl3*(log(isl3/isl2)))
+```
+
+```{r}
+island1 = kl_2from1 + kl_3from1
+island2 = kl_1_from2 + kl_3from2
+island3 = kl_1_from3 + kl_2from3
+
+island1
+island2
+island3
+```
+
+Island 1 predicts the others best because the sum of KL divergence using 1 to predict is smallest.
+
+### 4. Recall the marriage, age, and happiness collider bias example from Chapter 6. Run models m6.9 and m6.10 again. Compare these two models using WAIC (or LOO, they will produce identical results). Which model is expected to make better predictions? Which model provides the correct causal inference about the influence of age on happiness? Can you explain why the answers to these two questions disagree?
+
+```{r}
+d <- sim_happiness( seed=1977 , N_years=1000 )
+d2 <- d[ d$age>17 , ] # only adults
+d2$A <- ( d2$age - 18 ) / ( 65 - 18 )
+d2$mid <- d2$married + 1
+```
+
+```{r}
+m6.9 <- quap(
+alist(
+happiness ~ dnorm( mu , sigma ),
+mu <- a[mid] + bA*A,
+a[mid] ~ dnorm( 0 , 1 ),
+bA ~ dnorm( 0 , 2 ),
+sigma ~ dexp(1)
+) , data=d2 )
+precis(m6.9,depth=2)
+```
+
+```{r}
+m6.10 <- quap(
+alist(
+happiness ~ dnorm( mu , sigma ),
+mu <- a + bA*A,
+a ~ dnorm( 0 , 1 ),
+bA ~ dnorm( 0 , 2 ),
+sigma ~ dexp(1)
+) , data=d2 )
+precis(m6.10)
+```
+```{r}
+WAIC(m6.9)
+```
+
+```{r}
+WAIC(m6.10)
+```
+
+
+According to these results, m6.9 is expected to make better predictions. However, m6.10 provides the correct causal inference about the influence of age on happiness (ie, age does not influence happiness). The reason they disagree is because sometimes the best causal model doesn't produce the most accurate forecasts.
+
+# 5. Revisit the urban fox data, data(foxes), from the previous chapter’s practice problems. Use WAIC or PSIS based model comparison on five different models, each using weight as the outcome,and containing these sets of predictor variables:
+(1) avgfood + groupsize + area
+(2) avgfood + groupsize
+(3) groupsize + area
+(4) avgfood
+(5) area
+Can you explain the relative differences in WAIC scores, using the fox DAG from last week’s homework? Be sure to pay attention to the standard error of the score differences (dSE).
+```{r}
+data(foxes)
+d <- foxes
+```
+
+```{r}
+flist1 <- alist(weight ~ dnorm(mu, sigma),
+           mu <- a + b*avgfood + c* groupsize + e*area,
+           a ~ dnorm(0,2),
+           b ~ dnorm(0,2), 
+           c ~ dnorm(0,2),
+           e ~ dnorm(0,2),
+           sigma ~ dunif(0,10))
+
+m1 <- quap(flist1, d)
+
+
+flist2 <- alist(weight ~ dnorm(mu, sigma),
+           mu <- a + b*avgfood + c* groupsize,
+           a ~ dnorm(0,2),
+           b ~ dnorm(0,2), 
+           c ~ dnorm(0,2),
+           sigma ~ dunif(0,10))
+
+m2 <- quap(flist1, d)
+
+
+flist3 <- alist(weight ~ dnorm(mu, sigma),
+           mu <- a + c* groupsize + e*area,
+           a ~ dnorm(0,2),
+           c ~ dnorm(0,2),
+           e ~ dnorm(0,2),
+           sigma ~ dunif(0,10))
+
+m3 <- quap(flist3, d)
+
+flist4 <- alist(weight ~ dnorm(mu, sigma),
+           mu <- a + b* avgfood,
+           a ~ dnorm(0,2),
+           b ~ dnorm(0,2),
+           sigma ~ dunif(0,10))
+
+m4 <- quap(flist4, d)
+
+flist5 <- alist(weight ~ dnorm(mu, sigma),
+           mu <- a + b* area,
+           a ~ dnorm(0,2),
+           b ~ dnorm(0,2),
+           sigma ~ dunif(0,10))
+
+m5 <- quap(flist5, d)
+```
+
+```{r}
+compare(m1, m2, m3, m4, m5, func = WAIC)
+```
+
+M1 fits the data best because it makes use of all the data.
+M2 is close to M1 because after you know groupsize and avgfood, you don't gain much from also knowing area.
+M3 lacks avg food 
+M5 doesn't have groupsize
+M4 doesn't have area so it does worst
