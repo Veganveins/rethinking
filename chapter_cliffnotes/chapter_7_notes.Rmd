@@ -105,9 +105,9 @@ b ~ dnorm( 0 , 10 )
 
 Now to plot each model.
 ```{r}
-post <- extract.samples(m7.1)
+post <- extract.samples(m7.6)
 mass_seq <- seq( from=min(d$mass_std) , to=max(d$mass_std) , length.out=100 )
-l <- link( m7.1 , data=list( mass_std=mass_seq ) )
+l <- link( m7.6 , data=list( mass_std=mass_seq ) )
 mu <- apply( l , 2 , mean )
 ci <- apply( l , 2 , PI )
 plot( brain_std ~ mass_std , data=d )

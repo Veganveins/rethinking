@@ -1,0 +1,266 @@
+---
+title: "chapter 8 solutions"
+output: pdf_document
+---
+
+# Easy
+
+### 1. For each of the causal relationships below, name a hypothetical third variable that would lead to an interaction effect.
+
+* Bread dough rises because of yeast -> temperature
+* Education leads to higher income -> gender
+* Gasoline makes a car go -> tire pressure
+
+### 2. Which of the following explanations invokes an interaction?
+
+(1) Caramelizing onions requires cooking over low heat and making sure the onions do not dry out.
+(2) A car will go faster when it has more cylinders or when it has a better fuel injector.
+(3) Most people acquire their political beliefs from their parents, unless they get them instead from their friends.
+(4) Intelligent animal species tend to be either highly social or have manipulative appendages (hands, tentacles, etc.)
+
+All of them?
+
+### 3. For each of the explanations in 8E2, write a linear model that expresses the stated relationship.
+
+```{r}
+m1 <- alist(carmelize ~ dnorm(mu, sigma),
+            mu <- a + b*heat + c*dryness + d*heat*dryness)
+
+m2 <- alist(car_speed ~ dnorm(mu, sigma),
+            mu <- a + b*cylinders + c*fuel_injector + d*cylinder*fuel_injector)
+
+m3 <- alist(belief ~ dnorm(mu, sigma),
+            mu <- a + b*parents + c*friends + d*parents*friends)
+
+m4 <- alist(intelligence ~ dnorm(mu, sigma),
+            mu <- a + b*social + c*appendages + d*social*appendages)
+```
+
+# Medium.
+
+### 1. Recall the tulips example from the chapter. Suppose another set of treatments adjusted the temperature in the greenhouse over two levels: cold and hot. The data in the chapter were collected at the cold temperature. You find none of the plants grown under the hot temperature developed any blooms at all, regardless of the water and shade levels. Can you explain this result in terms of interactions between water, shade, and temperature?
+
+Blooms are conditional on water and shade, which are conditional on temperature.
+
+### 2. Can you invent a regression equation that would make the bloom size zero, whenever the temperature is hot?
+
+```{r}
+bloom = (a + b*water + c*shade + d*water*shade)*temp_cold
+```
+
+Where temp_cold = 0 if hot, 1 otherwise.
+
+### 3. In parts of North America, ravens depend upon wolves for their food. This is because ravens are carnivorous but cannot usually kill or open carcasses of prey. Wolves however can and do kill and tear open animals, and they tolerate ravens co-feeding at their kills. This species relationship is generally described as a “species interaction.” Can you invent a hypothetical set of data on raven population size in which this relationship would manifest as a statistical interaction? Do you think the biological interaction could be linear? Why or why not?
+
+```{r}
+wolf_pop <- rnorm(1000, 500, 100) 
+raven_pop <- rnorm(1000, wolf_pop, 30)
+
+d <- data.frame(wolf_pop = wolf_pop, raven_pop = raven_pop)
+head(d)
+```
+
+I think it's possible the biological interaction could be linear but there is probably some carrying capacity where more wolves wouldn't necessarily mean more ravens, if for example the wolves were all starving, or something.
+
+### 8H1. Return to the data(tulips) example in the chapter. Now include the bed variable as a predictor in the interaction model. Don’t interact bed with the other predictors; just include it as a main effect. Note that bed is categorical. So to use it properly, you will need to either construct dummy variables or rather an index variable, as explained in Chapter 6.
+
+```{r}
+data(tulips)
+d <- tulips
+
+d$blooms_std <- d$blooms / max(d$blooms)
+d$water_cent <- d$water - mean(d$water)
+d$shade_cent <- d$shade - mean(d$shade)
+
+mbed <- quap(
+alist(
+blooms_std ~ dnorm( mu , sigma ) ,
+mu <- a[bed] + bw*water_cent + bs*shade_cent + bws*water_cent*shade_cent ,
+a[bed] ~ dnorm( 0.5 , 0.25 ) ,
+bw ~ dnorm( 0 , 0.25 ) ,
+bs ~ dnorm( 0 , 0.25 ) ,
+bws ~ dnorm( 0 , 0.25 ) ,
+sigma ~ dexp( 1 )
+) , data=d )
+
+
+m_nobed <- quap(
+alist(
+blooms_std ~ dnorm( mu , sigma ) ,
+mu <- a + bw*water_cent + bs*shade_cent + bws*water_cent*shade_cent ,
+a ~ dnorm( 0.5 , 0.25 ) ,
+bw ~ dnorm( 0 , 0.25 ) ,
+bs ~ dnorm( 0 , 0.25 ) ,
+bws ~ dnorm( 0 , 0.25 ) ,
+sigma ~ dexp( 1 )
+) , data=d )
+
+```
+
+```{r}
+precis(mbed, depth = 3)
+```
+
+# 2. Use WAIC to compare the model from 8H1 to a model that omits bed. What do you infer from this comparison? Can you reconcile the WAIC results with the posterior distribution of the bed coefficients?
+
+```{r}
+compare(mbed, m_nobed, func = WAIC)
+```
+
+What do you infer: The model that includes bed is slightly better than the model without bed, but not by a whole lot (they are given comparable weights)
+
+Can you reconcile this with the posterior distribution of bed coefficients: All of the bed coefficients are pretty similar, (b and c are almost identical), and bed a is a little different than b and c. But since this indicator is kind of like a "single level indicator" knowing the bed isn't a huge information gain. Especially, knowing b or c there's basically no difference, but there's some small difference between bed a and beds b/c.
+```{r}
+precis(mbed, depth = 3)
+```
+
+# 3. Pretty sure they mean return to model m8.3. 
+
+```{r}
+data(rugged)
+d <- rugged
+# make log version of outcome
+d$log_gdp <- log( d$rgdppc_2000 )
+# extract countries with GDP data
+dd <- d[ complete.cases(d$rgdppc_2000) , ]
+# rescale variables
+dd$log_gdp_std <- dd$log_gdp / mean(dd$log_gdp)
+dd$rugged_std <- dd$rugged / max(dd$rugged)
+
+
+dd$cid <- ifelse( dd$cont_africa==1 , 1 , 2 )
+
+```
+
+```{r}
+m8.3 <- quap(
+alist(
+log_gdp_std ~ dnorm( mu , sigma ) ,
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ) ,
+a[cid] ~ dnorm( 1 , 0.1 ) ,
+b[cid] ~ dnorm( 0 , 0.3 ) ,
+sigma ~ dexp( 1 )
+) , data=dd )
+```
+
+# 3. Use WAIC pointwise penalties and PSIS Pareto k values to measure relative influence of each country. 
+```{r}
+PSIS_model <- PSIS(m8.3,pointwise=TRUE)
+WAIC_model <- WAIC(m8.3,pointwise=TRUE)
+plot( PSIS_model$k , WAIC_model$penalty , xlab="PSIS Pareto k" ,
+ylab="WAIC penalty" , col=rangi2 , lwd=2 )
+```
+
+# 3. By these criteria, is Seychelles influencing the results? 
+```{r}
+# get row of seycells
+seychelles_index = which(dd$country == 'Seychelles')
+
+# get k value for seycells
+PSIS_model[145,]
+```
+
+```{r}
+dd[seychelles_index, ]
+```
+
+According to this, Seychelles has a k value of .44 (less than .5). We can see from the plot it is the most influential point in this data. So yes, it is influencing the results.
+
+# 3. Are there other nations that are relatively influential? 
+We can see from the plot that there are a smattering of other points (at least two that jump out) that also seem to have above averagely high WAIC penalty scores, but none of them have k's over .5
+
+# 3. If so, can you explain why?
+I'd say the other countries shouldn't be overly influential as to hurt prediction, but they may influence the model more than some countries if that's fair?
+
+# 3 . Now use robust regression, as described in the previous chapter. Modify m8.5 to use a Student-t distribution with v = 2.
+```{r}
+m8.3b <- quap(
+alist(
+log_gdp_std ~ dstudent(2, mu , sigma ) ,
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ) ,
+a[cid] ~ dnorm( 1 , 0.1 ) ,
+b[cid] ~ dnorm( 0 , 0.3 ) ,
+sigma ~ dexp( 1 )
+) , data=dd )
+```
+
+# 3. Does this change the results in a substantial way?
+
+Yes, it does change the result in a substaintial way. Seychelle's k value dropped by an order of magnitude and switched direction(.44 to -.04) !
+
+```{r}
+PSIS_model <- PSIS(m8.3b,pointwise=TRUE)
+WAIC_model <- WAIC(m8.3b,pointwise=TRUE)
+plot( PSIS_model$k , WAIC_model$penalty , xlab="PSIS Pareto k" ,
+ylab="WAIC penalty" , col=rangi2 , lwd=2 )
+```
+
+```{r}
+PSIS_model[145,]
+```
+
+# 4. Try to honestly evaluate the main effects of both mean.growing.season and sd.growing.season on the outcome
+```{r}
+data(nettle)
+d <- nettle
+
+d$lang.per.cap <- d$num.lang / d$k.pop
+d$outcome = log(d$lang.per.cap)
+```
+
+# 4a. Evaluate the hypothesis that language diversity, as measured by log(lang.per.cap), is positively associated with the average length of the growing season, mean.growing.season. Consider log(area) in your regression(s) as a covariate (not an interaction).
+```{r}
+d$l_area = log(d$area)
+
+flista <- alist(outcome ~ dnorm(mu, sigma),
+                mu <- a + b*mean.growing.season + c*l_area,
+                a ~ dnorm(0,1),
+                b ~ dnorm(0,1),
+                c ~ dnorm(0,1),
+                sigma ~ dexp(1))
+
+mod_a <- quap(flista, d)
+precis(mod_a)
+```
+
+# 4a. Interpret your results.
+These results suggest that the growing season is positively associated with languages per capita...
+
+# 4b. Now evaluate the hypothesis that language diversity is negatively associated with the standard deviation of length of growing season, sd.growing.season. This hypothesis follows from uncertainty in harvest favoring social insurance through larger social networks and therefore fewer languages. Again, consider log(area) as a covariate (not an interaction). 
+
+```{r}
+flistb <- alist(outcome ~ dnorm(mu, sigma),
+                mu <- a + b*sd.growing.season + c*l_area,
+                a ~ dnorm(0,1),
+                b ~ dnorm(0,1),
+                c ~ dnorm(0,1),
+                sigma ~ dexp(1))
+
+mod_b <- quap(flistb, d)
+precis(mod_b)
+```
+
+# 4b. Interpret your results.
+These results do not necessarily suggest that the standard deviation of growing season is negatively associated with languages.
+
+
+# 4c.  Finally, evaluate the hypothesis that mean.growing.season and sd.growing.season interact to synergistically reduce language diversity
+
+```{r}
+flistc <- alist(outcome ~ dnorm(mu, sigma),
+                mu <- a + b*sd.growing.season + c*l_area + e*mean.growing.season + f*mean.growing.season*sd.growing.season,
+                a ~ dnorm(0,1),
+                b ~ dnorm(0,1),
+                c ~ dnorm(0,1),
+                e ~ dnorm(0,1),
+                f ~ dnorm(0,1),
+                sigma ~ dexp(1))
+
+mod_c <- quap(flistc, d)
+precis(mod_c)
+```
+
+In this model, f is the coefficient of the interaction between mean.growing.season and sd.growing.season. The 89% CI suggests that this term is in fact negatively associated with languages. So, it seems to be the case that this hypothesis is true.
+
+
+
