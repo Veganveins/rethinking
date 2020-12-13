@@ -63,7 +63,7 @@ pairs(d)
 ```
 
 ```{r}
-
+library(rethinking)
 wide_prior <- alist(y ~ dnorm(mu, sigma),
                     mu ~ a + b*x + c*x + e*x,
                     c(b,c,e) ~ dnorm(0,10),
