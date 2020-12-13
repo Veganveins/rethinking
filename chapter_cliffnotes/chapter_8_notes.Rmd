@@ -311,8 +311,7 @@ sigma ~ dexp( 1 )
 
 ```
 
-Triptych plots are very handy for understanding the impact of interactions. Here’s the strategy. We want each plot to show the bivariate relationship between water and blooms, as predicted by the model. Each plot will plot predictions for a different value of shade. For this example, it is easy to pick which three values of shade to use, because there are only three values: −1, 0, and 1. But more generally, you might use a representative low value, the median, and a representative high value. Here’s the code to draw posterior predictions for m8.4, the non-interaction model. This
-will loop over three values for shade, compute posterior predictions, then draw 20 lines from the posterior.
+Triptych plots are very handy for understanding the impact of interactions. Here’s the strategy. We want each plot to show the bivariate relationship between water and blooms, as predicted by the model. Each plot will plot predictions for a different value of shade. For this example, it is easy to pick which three values of shade to use, because there are only three values: -1, 0, and 1. But more generally, you might use a representative low value, the median, and a representative high value. Here’s the code to draw posterior predictions for m8.4, the non-interaction model. This will loop over three values for shade, compute posterior predictions, then draw 20 lines from the posterior.
 
 # Prior Predictive Check
 ```{r}
@@ -326,7 +325,7 @@ will loop over three values for shade, compute posterior predictions, then draw 
 #for ( i in 1:20 ) lines( -1:1 , mu[i,] , col=col.alpha("black",0.3) #)
 #}
 ```
-
+This above piece isn't really working...
 
 
 # Posterior Check
