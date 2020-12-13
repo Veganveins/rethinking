@@ -1,0 +1,297 @@
+---
+title: "Chapter 9 Notes"
+output: pdf_document
+---
+
+```{r}
+# U needs to return neg-log-probability
+U <- function( q , a=0 , b=1 , k=0 , d=1 ) {
+muy <- q[1]
+mux <- q[2]
+U <- sum( dnorm(y,muy,1,log=TRUE) ) + sum( dnorm(x,mux,1,log=TRUE) ) +
+dnorm(muy,a,b,log=TRUE) + dnorm(mux,k,d,log=TRUE)
+return( -U )
+}
+
+# gradient function
+# need vector of partial derivatives of U with respect to vector q
+U_gradient <- function( q , a=0 , b=1 , k=0 , d=1 ) {
+muy <- q[1]
+mux <- q[2]
+G1 <- sum( y - muy ) + (a - muy)/b^2 #dU/dmuy
+G2 <- sum( x - mux ) + (k - mux)/d^2 #dU/dmux
+return( c( -G1 , -G2 ) ) # negative bc energy is neg-log-prob
+}
+# test data
+set.seed(7)
+y <- rnorm(50)
+x <- rnorm(50)
+x <- as.numeric(scale(x))
+y <- as.numeric(scale(y))
+```
+
+```{r}
+library(shape) # for fancy arrows
+Q <- list()
+Q$q <- c(-0.1,0.2)
+pr <- 0.3
+plot( NULL , ylab="muy" , xlab="mux" , xlim=c(-pr,pr) , ylim=c(-pr,pr) )
+step <- 0.03
+
+L <- 11 # 0.03/28 for U-turns --- 11 for working example
+n_samples <- 4
+path_col <- col.alpha("black",0.5)
+points( Q$q[1] , Q$q[2] , pch=4 , col="black" )
+for ( i in 1:n_samples ) {
+Q <- HMC2( U , U_gradient , step , L , Q$q )
+if ( n_samples < 10 ) {
+for ( j in 1:L ) {
+K0 <- sum(Q$ptraj[j,]^2)/2 # kinetic energy
+lines( Q$traj[j:(j+1),1] , Q$traj[j:(j+1),2] , col=path_col , lwd=1+2*K0 )
+}
+points( Q$traj[1:L+1,] , pch=16 , col="white" , cex=0.35 )
+Arrows( Q$traj[L,1] , Q$traj[L,2] , Q$traj[L+1,1] , Q$traj[L+1,2] ,
+arr.length=0.35 , arr.adj = 0.7 )
+text( Q$traj[L+1,1] , Q$traj[L+1,2] , i , cex=0.8 , pos=4 , offset=0.4 )
+}
+points( Q$traj[L+1,1] , Q$traj[L+1,2] , pch=ifelse( Q$accept==1 , 16 , 1 ) ,
+col=ifelse( abs(Q$dH)>0.1 , "red" , "black" ) )
+}
+```
+```{r}
+HMC2 <- function (U, grad_U, epsilon, L, current_q) {
+q = current_q
+p = rnorm(length(q),0,1) # random flick - p is momentum.
+current_p = p
+# Make a half step for momentum at the beginning
+p = p - epsilon * grad_U(q) / 2
+# initialize bookkeeping - saves trajectory
+qtraj <- matrix(NA,nrow=L+1,ncol=length(q))
+ptraj <- qtraj
+qtraj[1,] <- current_q
+ptraj[1,] <- p
+
+# Alternate full steps for position and momentum
+for ( i in 1:L ) {
+q = q + epsilon * p # Full step for the position
+# Make a full step for the momentum, except at end of trajectory
+if ( i!=L ) {
+p = p - epsilon * grad_U(q)
+ptraj[i+1,] <- p
+}
+qtraj[i+1,] <- q
+}
+
+# Make a half step for momentum at the end
+p = p - epsilon * grad_U(q) / 2
+ptraj[L+1,] <- p
+# Negate momentum at end of trajectory to make the proposal symmetric
+p = -p
+# Evaluate potential and kinetic energies at start and end of trajectory
+current_U = U(current_q)
+current_K = sum(current_p^2) / 2
+proposed_U = U(q)
+proposed_K = sum(p^2) / 2
+# Accept or reject the state at end of trajectory, returning either
+# the position at the end of the trajectory or the initial position
+accept <- 0
+if (runif(1) < exp(current_U-proposed_U+current_K-proposed_K)) {
+new_q <- q # accept
+accept <- 1
+} else new_q <- current_q # reject
+return(list( q=new_q, traj=qtraj, ptraj=ptraj, accept=accept ))
+}
+```
+
+The rethinking package provides a convenient interface, ulam, to compile lists of formulas, like the lists you’ve been using so far to construct quap estimates, into Stan HMC code. A little more housekeeping is needed to use ulam: You should preprocess any variable transformations, and you should construct a clean data list with only the variables you will use. But otherwise installing Stan on your computer is the hardest part. And once you get comfortable with interpreting samples produced in this way, you go peek inside and see exactly how the model formulas you already understand correspond to the code that drives the Markov chain. When you use ulam, you can also use the same helper functions as quap: extract.samples, extract.prior, link, sim, and others.
+
+To see how ulam works, let’s revisit the terrain ruggedness example from Chapter 7. This code will load the data and reduce it down to cases (nations) that have the outcome variable of interest:
+
+```{r}
+library(rethinking)
+data(rugged)
+d <- rugged
+d$log_gdp <- log(d$rgdppc_2000)
+dd <- d[ complete.cases(d$rgdppc_2000) , ]
+dd$log_gdp_std <- dd$log_gdp / mean(dd$log_gdp)
+dd$rugged_std <- dd$rugged / max(dd$rugged)
+dd$cid <- ifelse( dd$cont_africa==1 , 1 , 2 )
+```
+
+So you remember the old way, we’re going to repeat the procedure for fitting the interaction model. This model aims to predict log GDP with terrain ruggedness, continent, and the interaction of the two. Here’s the way to do it with quap, just like before.
+```{r}
+m8.3 <- quap(
+alist(
+log_gdp_std ~ dnorm( mu , sigma ) ,
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ) ,
+a[cid] ~ dnorm( 1 , 0.1 ) ,
+b[cid] ~ dnorm( 0 , 0.3 ) ,
+sigma ~ dexp( 1 )
+) , data=dd )
+precis( m8.3 , depth=2 )
+```
+
+### Preparation. Now we’ll also fit this model using Hamiltonian Monte Carlo. 
+
+This means there will be no more quadratic approximation—if the posterior distribution is nonGaussian, then we’ll get whatever non-Gaussian shape it has. You can use exactly the same formula list as before, but you should do two additional things.
+
+(1) Preprocess all variable transformations. If the outcome is transformed somehow, like by taking the logarithm, then do this before fitting the model by constructing a new variable in the data frame. Likewise, if any predictor variables are transformed, including squaring and cubing and such to build polynomial models, then compute these transformed values before fitting the model. It’s a waste of computing power to do these transformations repeatedly in every step of the Markov chain.
+
+(2) Once you’ve got all the variables ready, make a new trimmed down data frame that contains only the variables you will actually use to fit the model. Technically, you don’t have to do this. But doing so avoids common problems. For example, if any of the unused variables have missing values, NA, then Stan will refuse to work. We’ve already pre-transformed all the variables. Now we need a slim list of the variables we will use:
+
+```{r}
+dat_slim <- list(
+log_gdp_std = dd$log_gdp_std,
+rugged_std = dd$rugged_std,
+cid = as.integer( dd$cid )
+)
+str(dat_slim)
+```
+
+It is better to use a list than a data.frame, because the elements in a list can be any length. In a data.frame, all the elements must be the same length. With some models to come later, like multilevel models, it isn’t unusual to have variables of different lengths.
+
+## Sampling from the posterior
+```{r}
+m9.1 <- ulam(
+alist(
+log_gdp_std ~ dnorm( mu , sigma ) ,
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ) ,
+a[cid] ~ dnorm( 1 , 0.1 ) ,
+b[cid] ~ dnorm( 0 , 0.3 ) ,
+sigma ~ dexp( 1 )
+) , data=dat_slim , chains=1 )
+```
+
+```{r}
+precis( m9.1 , depth=2 )
+```
+
+These estimates are very similar to the quadratic approximation. But note that there are two new columns, n_eff and Rhat. These columns provide MCMC diagnostic criteria, to help you tell how well the sampling worked. We’ll discuss them in detail later in the chapter. For now, it’s enough to know that n_eff is a crude estimate of the number of independent samples you managed to get. Rhat is a complicated estimate of the convergence of the Markov chains to the target distribution. It should approach 1.00 from above, when all is well.
+
+
+For now, it’s worth noting that you can easily parallelize those chains, as well. They
+can all run at the same time, instead of in sequence. So as long as your computer has four
+cores (it probably does), it won’t take longer to run four chains than one chain. To run four
+independent Markov chains for the model above, and to distribute them across separate cores
+in your computer, just increase the number of chains and add a cores argument:
+
+```{r}
+m9.1 <- ulam(
+alist(
+log_gdp_std ~ dnorm( mu , sigma ) ,
+mu <- a[cid] + b[cid]*( rugged_std - 0.215 ) ,
+a[cid] ~ dnorm( 1 , 0.1 ) ,
+b[cid] ~ dnorm( 0 , 0.3 ) ,
+sigma ~ dexp( 1 )
+) , data=dat_slim , chains=4, cores = 4 )
+```
+
+```{r}
+precis( m9.1 , 2 )
+```
+
+# Visualization
+```{r}
+pairs( m9.1 )
+```
+
+# Diagnostics - Trace Plot
+Provided the Markov chain is defined correctly, then it is guaranteed to converge in the long run to the answer we want, the posterior distribution. But some posterior distributions are hard to explore—there will be examples—and the time it would take for them to provide an unbiased approximation is very long indeed. Such problems are rarer for HMC than other algorithms, but they still exist. In fact, one of the virtues of HMC is that it tells us when things are going wrong. Other algorithms, like MetropolisHastings, can remain silent about major problems. In the next major section, we’ll dwell on causes of and solutions to malfunction.
+For now, let’s look at two chain visualizations that can often, but not always, spot problems. The first is called a trace plot. A trace plot merely plots the samples in sequential
+order, joined by a line. It’s King Markov’s path through the islands, in the metaphor at the start of the chapter. Looking at the trace plot of each parameter is often the best thing for diagnosing common problems. And once you come to recognize a healthy, functioning Markov chain, quick checks of trace plots provide a lot of peace of mind. A trace plot isn’t the last
+thing analysts do to inspect MCMC output. But it’s often the first. In the terrain ruggedness example, the trace plot shows a very healthy chain.
+
+```{r}
+traceplot(m9.1)
+```
+
+You can think of the zig-zagging trace of each parameter as the path the chain took through each dimension of parameter space. The gray region in each plot, the first 500 samples, marks the adaptation samples. During adaptation, the Markov chain is learning to more efficiently sample from the posterior distribution. So these samples are not reliable to use for inference. They are automatically discarded by extract.samples, which returns only the samples shown in the white regions of Figure 9.8. Now, how is this chain a healthy one? Typically we look for three things in these trace plots: (1) stationarity, (2) good mixing, and (3) convergence. Stationarity refers to the path of each chain staying within the same high-probability portion of the posterior distribution. Notice that these traces, for example, all stick around a very stable central tendency, the center of gravity of each dimension of the posterior. Another way to think of this is that the mean value of the chain is quite stable from beginning to end. Good mixing means that the chain rapidly explores the full region. It doesn’t slowly wander, but rather rapidly zig-zags around, as a good Hamiltonian chain should. Convergence means that multiple, independent chains stick around the same region of high probability.
+
+# Diagnostics - Trank Plot.
+Trace plots are a natural way to view a chain, but they are often hard to read, because once you start plotting lots of chains over one another, the plot can look very confusing and hide pathologies in some chains. A second way to visualize the chains is a plot of the distribution of the ranked samples, a trace rank plot, or trank plot. 148 What this means is to take all the samples for each individual parameter and rank them. The lowest sample gets rank 1. The largest gets the maximum rank (the number of samples across all chains). Then we draw a histogram of these ranks for each individual chain. Why do this? Because if the chains are exploring the same space efficiently, the histograms should be similar to one another and
+relatively uniform.
+
+```{r}
+trankplot( m9.1 , n_cols=2 )
+```
+The horizontal axis is rank, from 1 to the number of samples across all chains. The vertical axis is the frequency of ranks in each bin of the histogram. This
+trank plot is what we hope for: Histograms that overlap and stay within the same range. To really understand the value of these plots, you’ll have to see some trace and trank plots for unhealthy chains. That’s the project of the next section.
+
+# 9.5 Caring for your Markov Chain
+
+But as with many technical and powerful procedures, it’s natural to feel uneasy about MCMC and maybe even a little superstitious. Something magical is happening inside the computer, and unless we make the right sacrifices and say the right words, an ancient evil
+might awake. So we do need to understand enough to know when the evil stirs. The good news is that HMC, unlike Gibbs sampling and ordinary Metropolis, makes it easy to tell when the magic goes wrong. Its best feature is not how efficient it is. Rather the best feature
+is that it complains loudly when things aren’t right. Let’s look at some complaints and along the way establish some guidelines for running chains.
+
+# 9.5.1 How many samples do you need?
+
+So how many samples do we need for accurate inference about the posterior distribution? It depends. First, what really matters is the effective number of samples, not the raw number. The effective number of samples is an estimate of the number of independent samples from the posterior distribution. Markov chains are typically autocorrelated, so that sequential samples are not entirely independent. This reduces the effective number of samples. As you saw earlier in the chapter, Stan provides an estimate of effective number of samples as
+n_eff. It is only an estimate, but it is usually better to use it than the raw number of samples.
+
+Second, what do you want to know? If all you want are posterior means, it doesn’t take many samples at all to get very good estimates. Even a couple hundred samples will do. But if you care about the exact shape in the extreme tails of the posterior, the 99th percentile or
+so, then you’ll need many more. So there is no universally useful number of samples to aim for. In most typical regression applications, you can get a very good estimate of the posterior mean with as few as 200 effective samples. And if the posterior is approximately Gaussian, then all you need in addition is a good estimate of the variance, which can be had with one order of magnitude more, in most cases. For highly skewed posteriors, you’ll have to think more about which region of the distribution interests you. Stan will sometimes warn you about “tail ESS,” which means the effective sample size in the tails of the posterior. In those cases, it is nervous about the quality of extreme intervals, like 95%. Sampling more usually helps.
+
+# 9.5.1 How many chains do you need?
+
+There are three answers to this question. First, when initially debugging a model, use a single chain. There are some error messages that don’t display unless you use only one chain. The chain will fail with more than one chain, but the reason may not be displayed. This is why the ulam default is chains=1. Second, when deciding whether the chains are valid, you need more than one
+chain. Third, when you begin the final run that you’ll make inferences from, you only really need one chain. But using more than one chain is fine, as well.
+
+There are exotic situations in which all of the advice above must be modified. But for typical regression models, you can live by the motto one short chain to debug, four chains for verification and inference
+
+# Convergence diagnostics
+
+When n_eff is much lower than the actual number of
+iterations (minus warmup) of your chains, it means the chains are inefficient, but possibly still okay.
+When Rhat is above 1.00, it usually indicates that the chain has not yet converged, and probably you
+shouldn’t trust the samples. If you draw more iterations, it could be fine, or it could never converge. It’s important however not to rely too much on these diagnostics. Like all heuristics, there are cases in which they provide poor advice. For example, Rhat can reach 1.00 even for an invalid chain. So view it perhaps as a signal of danger, but never of safety.
+For conventional models, these metrics typically work well.
+
+# 9.5.3 Taming a wild chain
+
+Use totally flat priors:
+```{r}
+y <- c(-1,1) # very little data, mean should be 0
+set.seed(11)
+m9.2 <- ulam(
+alist(
+y ~ dnorm( mu , sigma ) ,
+mu <- alpha ,
+alpha ~ dnorm( 0 , 1000 ) ,
+sigma ~ dexp( 0.0001 )
+) , data=list(y=y) , chains=3 )
+
+precis(m9.2)
+```
+
+We drew 1500 samples total but only got a small number of effective samples.
+
+```{r}
+traceplot(m9.2)
+```
+
+The markov chains drift around and spike occassionally to extreme values. 
+```{r}
+trankplot(m9.2)
+```
+
+The rank histograms spend long periods with one chain above or below the others. This indicates poor exploration of the posterior.
+
+Instead, we can try again with slightly more informative priors:
+
+```{r}
+set.seed(11)
+m9.3 <- ulam(
+alist(
+y ~ dnorm( mu , sigma ) ,
+mu <- alpha ,
+alpha ~ dnorm( 1 , 10 ) ,
+sigma ~ dexp( 1 )
+) , data=list(y=y) , chains=3 )
+precis( m9.3 )
+```
+```{r}
+2+2
+```
+
+
+
