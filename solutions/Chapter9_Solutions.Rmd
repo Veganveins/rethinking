@@ -62,7 +62,7 @@ mu <- a[cid] + b[cid]*( rugged_std - 0.215 ) ,
 a[cid] ~ dnorm( 1 , 0.1 ) ,
 b[cid] ~ dnorm( 0 , 0.3 ) ,
 sigma ~ dexp( 1 )
-) , data=dat_slim , chains=4, cores = 4 )
+) , data=dat_slim , chains=2, cores = 2 )
 ```
 
 # update the chapter model to use a uniform prior for sigma
@@ -142,22 +142,24 @@ precis(m_exp_9)
 400 is enough
 
 ```{r}
+# for some unknown reason this code will not run...
+
 y <- rnorm( 100 , mean=0 , sd=1 )
 
-warm_400 <-  ulam(
-alist(
-y ~ dnorm( mu , sigma ) ,
-mu <- alpha ,
-alpha ~ dnorm( 1 , 10 ) ,
-sigma ~ dexp( 1 )
-) , data=list(y=y) , chains=3, iter = 1000, warmup = 400)
+#warm_400 <-  ulam(
+#alist(
+#y ~ dnorm( mu , sigma ) ,
+#mu <- alpha ,
+#alpha ~ dnorm( 1 , 10 ) ,
+#sigma ~ dexp( 1 )
+#) , data=list(y=y) , chains=3, iter = 1000, warmup = 400)
 ```
 ```{r}
-precis(warm_400)
+#precis(warm_400)
 ```
 
 ```{r}
-traceplot(warm_400)
+#traceplot(warm_400)
 ```
 
 Try again with 300
