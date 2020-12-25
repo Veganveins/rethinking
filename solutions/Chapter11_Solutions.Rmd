@@ -1,0 +1,530 @@
+---
+title: "Chapter 11 Solutions"
+output: pdf_document
+---
+
+# Easy
+
+https://rpubs.com/taixingbi/ana505-s9
+
+1. If an event has probability .35, what are the log-odds of this event?
+
+```{r}
+log_odds_event = log(.35/.65)
+log_odds_event
+```
+
+2. If an event has log-odds 3.2, what is the probability of this event?
+```{r}
+#3.2 = log(x / 1-x)
+#3.2 = log(x) - log(1-x)
+#exp(3.2) = x - 1 + x
+.5*(exp(3.2) + 1) -> x
+x
+```
+
+3. Suppose that a coefficient in a logistic regression has value 1.7. What does this imply about the proportional change in odds of the outcome?
+```{r}
+exp(1.7)
+```
+
+4. Why do Poisson regressions sometimes require the use of an offset?
+
+In some cases, different observations are aggregated over different time frames. For example one observation in the data might be 3 manuscripts (in a day), another observations might be 10 manuscripts (in a week). The offset is used to compare all the observations on an apples-to-apples scale.
+
+# Medium
+
+1. Binomial data can be organized in aggregated and disaggregated forms, without any impact on inference. But the likelihood of the data does change when the data are
+converted between the two formats. Can you explain why?
+
+_Because when converting likelihood in the aggregated form to the non-aggregated format, the c(n,m) multiplier is converted to a constant at the log scale_
+
+2. If a coefficient in a Poisson regression has value 1.7, what does this imply about the change in the outcome?
+
+_It indicates that the change of the predictor by 1 unit increases the lambda parameter of the Poisson distribution by exp(1.7)=5.4739 times._
+
+3. Explain why the logit link is appropriate for the binomial GLM.
+
+_The logit link maps a parameter that is defined as a probability mass (therefore constrained to lie between zero and one) onto a linear model that can take any real value._
+
+4. Explain why the log link is appropriate for a Poisson GLM.
+
+_The log link constrains lambda to be positive, and poisson models model counts (ie, things that can't be negative)_
+
+5. What would it imply to use a logit link for the mean of a Poisson GLM? Can you think of a real research problem for which this would make sense?
+
+_Using logit link implies that lambda always falls on [0, +inf]_
+
+6. State the constraints for which the binomial and Poisson distributions have maximum entropy. Are the constraints different between the two? Why or why not?
+
+_Binomial: Events are discrete and expected value is constant. _
+_Poisson: Variance is equal to expected value and both are constant_
+
+_Poisson distributions have more constraints than binomial because it's a special case of the binomial._
+
+# Hard
+
+1. Use quap to construct a quadratic approximate posterior distribution for the chimpanzee model that includes a unique intercept for each actor, m11.4. 
+
+```{r}
+library(rethinking)
+data("chimpanzees")
+d <- chimpanzees
+d$treatment <- 1 + d$prosoc_left + 2*d$condition
+d$recipient <- NULL
+```
+
+```{r}
+# build model using quap
+flist <- alist(
+  pulled_left ~ dbinom( 1 , p ) ,
+  logit(p) <- a[actor] + b[treatment],
+  a[actor] ~ dnorm(0,1.5),
+  b[treatment] ~ dnorm(0,.5)
+) 
+
+quap_model <- quap(flist, d)
+```
+
+```{r}
+# re-construct the model the MCMC way
+dat_list <- list(
+pulled_left = d$pulled_left,
+actor = d$actor,
+treatment = as.integer(d$treatment) )
+
+m11.4 <- ulam(
+alist(
+pulled_left ~ dbinom( 1 , p ) ,
+logit(p) <- a[actor] + b[treatment] ,
+a[actor] ~ dnorm( 0 , 1.5 ),
+b[treatment] ~ dnorm( 0 , 0.5 )
+) , data=dat_list , chains=4 , log_lik=TRUE )
+```
+
+Compare the quadratic approximation to the posterior distribution produced instead from MCMC.
+
+```{r}
+compare(quap_model, m11.4)
+```
+
+```{r}
+precis(quap_model, depth = 2)
+```
+
+```{r}
+precis(m11.4, depth = 2)
+```
+
+Can you explain both the differences and the similarities between the approximate and the MCMC distributions?
+
+_Similarities: The precis() output shows that the mean and distributions of the various parameters are very close to each other. This makes sense since the model structure is basically the same through out._
+
+_Differences: The MCMC distribution appears to do a slightly better job of approximating the posterior, out-of-sample, compared to the approximate. I am not really quite sure why though... _
+
+2. Use WAIC to compare the chimpanzee model that includes a unique intercept for each actor, to the simpler models fit in the same section.
+```{r}
+m11.1 <- quap(
+alist(
+pulled_left ~ dbinom( 1 , p ) ,
+logit(p) <- a ,
+a ~ dnorm( 0 , 1.5 )
+) , data=d )
+```
+
+```{r}
+m11.2 <- quap(
+alist(
+pulled_left ~ dbinom( 1 , p ) ,
+logit(p) <- a + b[treatment] ,
+a ~ dnorm( 0 , 1.5 ),
+b[treatment] ~ dnorm( 0 , .5 )
+) , data=d )
+```
+
+```{r}
+m11.3 <- quap(
+alist(
+pulled_left ~ dbinom( 1 , p ) ,
+logit(p) <- a + b[treatment] ,
+a ~ dnorm( 0 , 1.5 ),
+b[treatment] ~ dnorm( 0 , 0.5 )
+) , data=d )
+```
+
+```{r}
+compare(m11.1, m11.2, m11.3, m11.4)
+```
+
+3. Bald eagle salmon pirating. While one eagle feeds, sometimes another will swoop in and try to steal the salmon from it. Call the feeding eagle the 'victim' and the thief the 'pirate.' Use the available data to build a binomial GLM of successful pirating attempts.
+
+Solutions here: http://xcelab.net/rm/wp-content/uploads/2012/01/week07-ch8-solutions.pdf
+
+```{r}
+library(MASS)
+data(eagles)
+d <- eagles
+# y = # successful attempts
+# n = total attempts
+# P = size of pirating eagle (L = large, S = small)
+# A = age of pirating eagle (I = immature, A = adult)
+# V = size of victime eagle (L = large, S = small)
+d$big_pirate = ifelse(d$P == "L", 1, 0)
+d$big_victim = ifelse(d$V == "L", 1, 0)
+d$adult_pirate = ifelse(d$A == "A", 1, 0)
+head(d, 3)
+```
+### a. Fit the given model to the eagles data, using both quap and ulam. Is the quadratic approximation okay?
+
+_To me it seems like the quadratic approximation gets pretty stuck. Bad start values it seems._
+
+```{r}
+# fit the quap model first
+#flist <- alist(y ~ dbinom(n, pr),
+ #              logit(pr) <- a + bp*P + bv*V + ba*A,
+  #             a ~ dnorm(0, 1.5),
+   #            bp ~ dnorm(0, .5),
+    #          ba ~ dnorm(0, .5))
+
+#quap_model = quap(flist, d)
+```
+
+```{r}
+# try again with ulam
+dat_list <- list(
+y = d$y,
+n = d$n,
+big_pirate = d$big_pirate,
+adult_pirate = d$adult_pirate,
+big_victim = d$big_victim)
+
+mcmc_model <- ulam(
+  alist(
+    y ~ dbinom(n, pr),
+    logit(pr) <- a + bp*big_pirate + bv*big_victim + ba*adult_pirate,
+    a ~ dnorm(0, 1.5),
+    bp ~ dnorm(0, .5),
+    bv ~ dnorm(0, .5),
+    ba ~ dnorm(0, .5)),
+    data = dat_list, chains = 4, log_lik = TRUE)
+
+```
+
+### b. Now interpret the estimates.
+
+```{r}
+precis(mcmc_model)
+```
+The intercept log-odds, a, indicates the log-odds probability of a successful attempt for a _small and immature pirate_ attacking a small victim. To convert this log-odds back to the "outcome scale" -- ie the non-log-odds scale, we need to apply the _inverse logit_, otherwise known as the _logistic_ function.
+
+```{r}
+# probability of small immature pirate successfully stealing from a small victim
+exp(.32) / (1 + exp(.32))
+```
+58% of attempts by immature small pirates on small victims are expected to succeed.
+
+```{r}
+# probability of a big immature pirate successfully stealing from a small victim
+exp(.32 + 1.62)/(1 + exp(.32 + 1.62))
+```
+87% of attempts by large immature pirates  on small victims are expected to succeed.
+
+```{r}
+# probability of a big adult pirate successfully stealing from a small victim
+exp(.32 + 1.62 + .66)/(1 + exp(.32 + 1.62 + .66))
+```
+93% of attemps by large adult pirates on small victims are expected to succeed.
+
+```{r}
+# probability of a big adult pirate successfully stealing from a big victim
+exp(.32 + 1.62 + .66 - 1.7)/(1 + exp(.32 + 1.62 + .66 - 1.7))
+```
+
+71% of attempts by large adult pirates on large victims are expected to succeed.
+
+So the odds of success go down when the victim gets bigger, and they go up when the pirate gets bigger.
+
+We can also interpret the results another way by looking at the _proportional odds._ We can see this by exponentiating each beta estiamte.
+```{r}
+exp(coef(mcmc_model))
+```
+
+So this says that the odds (p/(1-p)) of a successful attempt are multiplied by about 5 when a pirate becomes large. The odds of success are multiplied by .18 when the victim becomes large. When the pirate and victim become large, the proportional change in odds is 5.07 x .18 = .91 (the net effect is that it gets harder to make the steal). Finally, the effect of being an adult is to roughly double the odds, multiplying them by 1.92. These are all _relative_ risk measures. For the absolute measures, it'll be nice to plot them.
+
+## 3b. Plot the posterior predictions
+
+### Compute and display the predicted probability of success and its 89% interval for each row in the data
+```{r}
+# matrix of predictions for each row of data
+y.preds = link(mcmc_model, data = d) 
+y.mean = apply(y.preds, 2, mean)
+y.ci = apply(y.preds, 2, PI, prob = .89)
+```
+
+```{r}
+d$success_rate = d$y / d$n
+preds = data.frame(case = c('LAL','LAS','LIL','LIS','SAL','SAS','SIL','SIS'),
+                  actual_success_rate = d$success,
+                  predicted = y.mean,
+                  lower_ci = y.ci[1,],
+                  upper_ci = y.ci[2,])
+head(preds, 3)
+```
+
+```{r}
+ggplot(data = preds, aes(x = case, y = actual_success_rate, color = 'Observed Success Rate'))+
+  geom_point()+
+  geom_point(aes(x = case, y = y.mean, color = 'Model Predictions'))+
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci, color = '89% Predicted CI'))+
+  ggtitle('Binomial Model')
+```
+
+In only 2 out of 8 cases is the observation within the model's 89% CI. This is definitely a disappointing result.
+
+### Compute and display the predicted success count and its 89% interval.
+```{r}
+preds$trials = d$n
+preds$actual_successes = d$y
+preds$predicted_success_count = preds$trials * preds$predicted
+preds$success_lower = preds$trials * preds$lower_ci
+preds$success_upper = preds$trials * preds$upper_ci
+```
+
+```{r}
+ggplot(data = preds, aes(x = case, y = actual_successes, color = 'Observed Successes'))+
+  geom_point()+
+  geom_point(aes(x = case, y = predicted_success_count, color = 'Model Predictions'))+
+  geom_errorbar(aes(ymin = success_lower, ymax = success_upper, color = '89% Predicted CI'))
+```
+
+### What different information does each type of posterior prediction provide?
+
+The top plot is more useful because it makes the probabilities comparable. We can quickly see that cases when the attacker is larger than the victim are predicted to be more successful. The count plot gives us a quick way to double check sample size for each of the predictions. For example, we can be most "confident" in our predictions for the LAS case, since it occurred the most times, and least "confident" in the reliability of our predictions for the SIS cases, since it occurred the least times.
+
+## 3c. Now try to improve the model. Consider an interaction between the pirate's size and age. 
+
+prior for a: average success rate should always be positive...It should be somewhere between 0 and 1 so might make sense to center it at 50%.... a = 0 on log-odds scale corresponds to 50% on outcome scale. We can increase the sigma on a to 3 to give the outcome a range from 5% to 95% as plausible values
+prior for bp: this should improve success rate, so also should be postive
+prior for ba: should be positive
+prior for bv: should be negative (big victims decrease success rate)
+prior for bpa: not really sure, give it a range centered at 0?
+
+```{r}
+interaction_mod <- ulam(
+  alist(
+    y ~ dbinom(n, pr),
+    logit(pr) <- a + bp*big_pirate + bv*big_victim + ba*adult_pirate + bpa * adult_pirate * big_pirate,
+    a ~ dnorm(0, 3),
+    bp ~ dnorm(3, 1),
+    bv ~ dnorm(-3, 1),
+    ba ~ dnorm(3, 1),
+    bpa ~ dnorm(0, 1.5)),
+    data = dat_list, chains = 4, log_lik = TRUE)
+
+```
+
+### Compare this model to the previous one using WAIC
+```{r}
+compare(mcmc_model, interaction_mod, n = sum(d$n))
+```
+This looks like either strong support for the interaction, or possibly just for the better priors...
+
+```{r}
+precis(interaction_mod)
+```
+log-odds for a is -.19 which corresponds to about 45% probability on outcome scale. This seems fairly reasonable! The 89% CI ranges from 23% to 69% as "average success rate." Also seems reasonable.
+
+### Interpret.
+
+```{r}
+# matrix of predictions for each row of data
+y.preds = link(interaction_mod, data = d) 
+y.mean = apply(y.preds, 2, mean)
+y.ci = apply(y.preds, 2, PI, prob = .89)
+```
+
+```{r}
+preds = data.frame(case = c('LAL','LAS','LIL','LIS','SAL','SAS','SIL','SIS'),
+                  actual_success_rate = d$success,
+                  predicted = y.mean,
+                  lower_ci = y.ci[1,],
+                  upper_ci = y.ci[2,])
+```
+
+```{r}
+ggplot(data = preds, aes(x = case, y = actual_success_rate, color = 'Observed Success Rate'))+
+  geom_point()+
+  geom_point(aes(x = case, y = y.mean, color = 'Model Predictions'))+
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci, color = '89% Predicted CI'))+
+  ggtitle('Visualizing Interaction Model Predictions')
+```
+
+This looks much better! All of the situations are now contained in the 89% CI, and in most cases the mean value is pretty close to the actual observation. 
+
+```{r}
+no_int_mod <- ulam(
+  alist(
+    y ~ dbinom(n, pr),
+    logit(pr) <- a + bp*big_pirate + bv*big_victim + ba*adult_pirate,
+    a ~ dnorm(0, 3),
+    bp ~ dnorm(3, 1),
+    bv ~ dnorm(-3, 1),
+    ba ~ dnorm(3, 1)),
+    data = dat_list, chains = 4, log_lik = TRUE)
+```
+
+Out of curiosity, I want to see if the interaction model is also considerably better if we re-train the original model using the same priors, but remove the interaction:
+
+```{r}
+compare(no_int_mod, interaction_mod, mcmc_model)
+```
+Ah, so the original model has terrible priors. It is significantly improved by the addition of better priors, and we can see that the interaction seems to make a big difference improving it even still. Nice!
+
+# 4. Salamanders
+
+https://www.samples-of-thoughts.com/projects/statistical-rethinking/chapter_10/chp10-ex/
+
+Counts of salamanders from 47 different plots in CA. 
+
+```{r}
+data("salamanders")
+d <- salamanders
+head(d)
+```
+
+
+## 4a. Model the relationship between density and percent cover
+
+Use a log-link (same as the example in the book and lecture). Use weakly informative priors of your choosing. 
+
+Let a be centered at -5 (which is essentially 0 on the outcome scale). My guess is that when cover is at 0, salamanders won't be very happy.
+
+The coefficient on cover should probably be positive.
+
+```{r}
+dat <- list(
+cover = d$PCTCOVER ,
+density = d$SALAMAN 
+)
+
+msal <- ulam(
+alist(
+density ~ dpois( lambda ),
+log(lambda) <- a + b*cover,
+a ~ dnorm(-1,2),
+b ~ dnorm(-1, 3)
+), data=dat , chains=4 , iter = 4000, log_lik=TRUE )
+```
+
+```{r}
+precis(msal)
+```
+
+The estimate for b is positive, which means counts are predicted to increase with
+cover. But by how much? Hard to say, until you convert back to the
+count scale. So let’s plot the predictions, now.
+
+```{r}
+post <- sample.naive.posterior( msal)
+x.seq <- 0:100
+mu <- sapply( x.seq , function(z)
+mean( exp( post$a + post$b*z ) ) )
+mu.ci <- sapply( x.seq , function(z)
+PCI( exp( post$a + post$b*z ) ) )
+y.ci <- sapply( x.seq , function(z)
+PCI( rpois( 10000 , exp( post$a + post$b*z ) ) ) )
+```
+
+## 4a. Plot the expected counts and their 89% CI against percent cover. In what ways does the model do a good job? In what ways does the model do a bad job?
+
+```{r}
+plot( SALAMAN ~ PCTCOVER , data=d , col='slateblue' , main = 'Posterior Prediction for Salamander Counts')
+lines( x.seq , mu )
+lines( x.seq , mu.ci[1,] , lty=2 )
+lines( x.seq , mu.ci[2,] , lty=2 )
+lines( x.seq , y.ci[1,] , lty=2 )
+lines( x.seq , y.ci[2,] , lty=2 )
+```
+
+Good job: Model figured out that more cover corresponds to more salamanders
+Bad job: We can see tha the data seems to have two clusters, cover up to 80% vs cover above 80%. That seems to be the threshold for happy salamanders. The model is trying to capture this continuously but it seems like it might be better captured through some sort of discrete relationship.
+
+
+## 4b. Add forestage to the model
+```{r}
+cor(d$FORESTAGE, d$PCTCOVER)
+```
+
+```{r}
+hist(d$FORESTAGE)
+```
+
+```{r}
+hist(log(d$FORESTAGE))
+```
+
+How much does adding forest age help, once we already know cover?
+
+```{r}
+d$logFORESTAGE <- log(d$FORESTAGE + 1 )
+d$logFORESTAGE_c <- d$logFORESTAGE - mean(d$logFORESTAGE)
+
+
+dat <- list(
+cover = d$PCTCOVER ,
+density = d$SALAMAN,
+forest = d$logFORESTAGE_c
+)
+
+fc <- ulam(
+alist(
+density ~ dpois( lambda ),
+log(lambda) <- a + b*cover + c*forest,
+a ~ dnorm(-1.5, .4),
+b ~ dnorm(.03, .1),
+c ~ dnorm(.03, .1) 
+), data=dat , chains=4 , iter = 8000, log_lik=TRUE )
+```
+
+```{r}
+precis(fc)
+```
+
+```{r}
+compare(fc, msal)
+```
+
+
+## 4b. Can you explain why FORESTAGE helps or does not help with prediction?
+
+```{r}
+plot(SALAMAN ~ FORESTAGE, data=d[d$PCTCOVER > 75,],
+     main="Salamander count depending on Forest age",
+     sub="For plots of a coverage greater than 75%")
+```
+
+
+In summary, the older a forest is, the more likely it has a high ground coverage. If the ground coverage is high, then the age of the forest doesn’t add any additional information that help predict the salamder count.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
