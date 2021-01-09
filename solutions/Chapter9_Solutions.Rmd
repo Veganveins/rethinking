@@ -65,6 +65,7 @@ sigma ~ dexp( 1 )
 ) , data=dat_slim , chains=2, cores = 2 )
 ```
 
+
 # update the chapter model to use a uniform prior for sigma
 ```{r}
 m9.1_flat <- ulam(
@@ -125,11 +126,11 @@ sigma ~ dexp(1 )
 
 
 ```{r}
-precis(m_exp_1)
+precis(m_exp_)
 ```
 
 ```{r}
-precis(m_exp_9)
+precis(m_exp_1)
 ```
 
 # can't really get the reducing scale thing to work with exp
@@ -154,6 +155,7 @@ y <- rnorm( 100 , mean=0 , sd=1 )
 #sigma ~ dexp( 1 )
 #) , data=list(y=y) , chains=3, iter = 1000, warmup = 400)
 ```
+
 ```{r}
 #precis(warm_400)
 ```
@@ -174,6 +176,7 @@ sigma ~ dexp( 1 )
 iter = 1000,
 warmup = 300)
 ```
+
 ```{r}
 traceplot(warm_300)
 ```

@@ -1,0 +1,458 @@
+---
+title: "Chapter 14 Notes"
+output: pdf_document
+---
+
+"Intercepts and slopes can co-vary"
+Cafe's with long average wait times in the mornings may have bigger differences between morning and afternoon wait times.
+
+# I. Varying slopes by construction
+
+##1. Simulate the population
+```{r}
+a <- 3.5 # average morning wait time
+b <- (-1) # average difference afternoon wait time
+sigma_a <- 1 # std dev in intercepts
+sigma_b <- 0.5 # std dev in slopes
+rho <- (-0.7) # correlation between intercepts and slopes
+```
+
+These values define the entire population of cafés. To use these values to simulate a sample
+of cafés for the robot, we’ll need to build them into a 2-dimensional multivariate Gaussian
+distribution.
+
+```{r}
+Mu <- c( a , b )
+cov_ab <- sigma_a*sigma_b*rho
+# awkward way to get matrix but works; r will fill columns down before moving over to next row
+Sigma <- matrix( c(sigma_a^2,cov_ab,cov_ab,sigma_b^2) , ncol=2 )
+```
+
+```{r}
+sigmas <- c(sigma_a,sigma_b) # standard deviations
+Rho <- matrix( c(1,rho,rho,1) , nrow=2 ) # correlation matrix
+# now matrix multiply to get covariance matrix
+Sigma <- diag(sigmas) %*% Rho %*% diag(sigmas)
+```
+
+```{r}
+N_cafes <- 20
+library(MASS)
+set.seed(5) # used to replicate example
+# sample randomly from the multivariate Gaussian
+# distribution defined by Mu and Sigma
+vary_effects <- mvrnorm( N_cafes , Mu , Sigma )
+```
+
+
+The contents of vary_effects should be a matrix with 20 rows and 2 columns. Each row is a café. The first column contains intercepts. The second column contains slopes
+```{r}
+a_cafe <- vary_effects[,1]
+b_cafe <- vary_effects[,2]
+```
+
+```{r}
+plot( a_cafe , b_cafe , col=rangi2 ,
+xlab="intercepts (a_cafe)" , ylab="slopes (b_cafe)" )
+# overlay population distribution
+library(ellipse)
+for ( l in c(0.1,0.3,0.5,0.8,0.99) )
+lines(ellipse(Sigma,centre=Mu,level=l),col=col.alpha("black",0.2))
+```
+
+## 2. Simulate observations
+
+We have simulated individual cafes and their average properties. Now we want to simulate the robot visiting these cafes and collecting data.
+
+```{r}
+set.seed(22)
+N_visits <- 10
+afternoon <- rep(0:1,N_visits*N_cafes/2)
+cafe_id <- rep( 1:N_cafes , each=N_visits ) 
+mu <- a_cafe[cafe_id] + b_cafe[cafe_id]*afternoon
+wait <- rnorm(N_visits*N_cafes, mu, sigma_b)
+d <- data.frame( cafe=cafe_id , afternoon=afternoon , wait=wait )
+```
+
+Remember that Bayesian inference does not depend upon data-generating assumptions, such as the likelihood, being true. Non-Bayesian approaches may depend upon sampling distributions for their inferences, but this is not the case for a Bayesian model. In a Bayesian model, a likelihood is a prior for the data, and inference about parameters can be surprisingly insensitive to its details.
+
+## 3. Varying Slopes Model
+
+We just defined a specific statistical population by defining up front what a, b, sigma, and rho should be. We used that to then generate fake data for a set of 20 cafes. Now we will reverse the process by using the data to fit a model to hopefully recover the original statistical population.
+
+```{r}
+# this code fails for some mysterious reason...
+
+# set.seed(867530)
+# m14.1 <- ulam(
+# alist(
+# wait ~ normal( mu , sigma ),
+# mu <- a_cafe[cafe] + b_cafe[cafe]*afternoon,
+# c(a_cafe,b_cafe)[cafe] ~ multi_normal( c(a,b) , Rho , sigma_cafe ),
+# a ~ normal(5,2),
+# b ~ normal(-1,0.5),
+# sigma_cafe ~ exponential(1),
+# sigma ~ exponential(1),
+# Rho ~ lkj_corr(2)
+# ) , data=d , chains=4 , cores=4 )
+```
+
+
+The distribution multi_mnormal is a multivariate Gaussian notation that takes a vector of
+means, c(a,b), a correlation matrix, Rho, and a vector of standard deviations, sigma_cafe.
+It constructs the covariance matrix internally
+
+```{r}
+# post <- extract.samples(m14.1)
+# dens( post$Rho[,1,2] , xlim=c(-1,1) ) # posterior
+# R <- rlkjcorr( 1e4 , K=2 , eta=2 ) # prior
+# dens( R[,1,2] , add=TRUE , lty=2 )
+```
+
+Next, consider the shrinkage. The multilevel model estimates posterior distributions for intercepts and slopes of each café. The inferred correlation between these varying effects was used to pool information across them. This is just as the inferred variation among intercepts pools information among them, as well as how the inferred variation among slopes pools information among them. All together, the variances and correlation define an inferred multivariate Gaussian prior for the varying effects. And this prior, learned from the data, adaptively regularizes both the intercepts and slopes.
+
+```{r}
+# compute unpooled estimates directly from data
+a1 <- sapply( 1:N_cafes ,
+function(i) mean(wait[cafe_id==i & afternoon==0]) )
+b1 <- sapply( 1:N_cafes ,
+function(i) mean(wait[cafe_id==i & afternoon==1]) ) - a1
+# extract posterior means of partially pooled estimates
+post <- extract.samples(m14.1)
+a2 <- apply( post$a_cafe , 2 , mean )
+b2 <- apply( post$b_cafe , 2 , mean )
+# plot both and connect with lines
+plot( a1 , b1 , xlab="intercept" , ylab="slope" ,
+pch=16 , col=rangi2 , ylim=c( min(b1)-0.1 , max(b1)+0.1 ) ,
+xlim=c( min(a1)-0.1 , max(a1)+0.1 ) )
+points( a2 , b2 , pch=1 )
+for ( i in 1:N_cafes ) lines( c(a1[i],a2[i]) , c(b1[i],b2[i]) )
+
+# and to superimpose the contours of the population:
+
+# compute posterior mean bivariate Gaussian
+Mu_est <- c( mean(post$a) , mean(post$b) )
+rho_est <- mean( post$Rho[,1,2] )
+sa_est <- mean( post$sigma_cafe[,1] )
+sb_est <- mean( post$sigma_cafe[,2] )
+cov_ab <- sa_est*sb_est*rho_est
+Sigma_est <- matrix( c(sa_est^2,cov_ab,cov_ab,sb_est^2) , ncol=2 )
+# draw contours
+library(ellipse)
+for ( l in c(0.1,0.3,0.5,0.8,0.99) )
+lines(ellipse(Sigma_est,centre=Mu_est,level=l),
+col=col.alpha("black",0.2))
+```
+
+
+```{r}
+# convert varying effects to waiting times
+wait_morning_1 <- (a1)
+wait_afternoon_1 <- (a1 + b1)
+wait_morning_2 <- (a2)
+wait_afternoon_2 <- (a2 + b2)
+# plot both and connect with lines
+plot( wait_morning_1 , wait_afternoon_1 , xlab="morning wait" ,
+ylab="afternoon wait" , pch=16 , col=rangi2 ,
+ylim=c( min(wait_afternoon_1)-0.1 , max(wait_afternoon_1)+0.1 ) ,
+xlim=c( min(wait_morning_1)-0.1 , max(wait_morning_1)+0.1 ) )
+points( wait_morning_2 , wait_afternoon_2 , pch=1 )
+for ( i in 1:N_cafes )
+lines( c(wait_morning_1[i],wait_morning_2[i]) ,
+c(wait_afternoon_1[i],wait_afternoon_2[i]) )
+abline( a=0 , b=1 , lty=2 )
+
+# now shrinkage distribution by simulation
+v <- mvrnorm( 1e4 , Mu_est , Sigma_est )
+v[,2] <- v[,1] + v[,2] # calculate afternoon wait
+Sigma_est2 <- cov(v)
+Mu_est2 <- Mu_est
+Mu_est2[2] <- Mu_est[1]+Mu_est[2]
+# draw contours
+library(ellipse)
+for ( l in c(0.1,0.3,0.5,0.8,0.99) )
+lines(ellipse(Sigma_est2,centre=Mu_est2,level=l),
+col=col.alpha("black",0.5))
+```
+
+
+# 14.2 Advanced Varying Slopes
+
+Chapter 13 looked into "cross-classification" two two kinds of varying intercepts. It also modeled the experiment with two different slopes: one for the effect of the prosocial option and one for the interaction between the prosocial option and the presence of another chimpanzee.
+
+Now we will model both types of clusters and place varying effects on the intercepts iand both slopes For any given multi-level model, there are several different ways to write it down. These ways are called "parameterizations."
+
+Since there are two cluster types, actors and blocks, there are two multivariate Gaussian priors. 
+
+```{r}
+# code will not run....
+set.seed(4387510)
+m14.3 <- ulam(
+alist(
+L ~ binomial(1,p),
+logit(p) <- g[tid] + alpha[actor,tid] + beta[block_id,tid],
+# adaptive priors - non-centered
+transpars> matrix[actor,4]:alpha <-
+compose_noncentered( sigma_actor , L_Rho_actor , z_actor ),
+transpars> matrix[block_id,4]:beta <-
+compose_noncentered( sigma_block , L_Rho_block , z_block ),
+matrix[4,actor]:z_actor ~ normal( 0 , 1 ),
+matrix[4,block_id]:z_block ~ normal( 0 , 1 ),
+# fixed priors
+g[tid] ~ normal(0,1),
+vector[4]:sigma_actor ~ dexp(1),
+cholesky_factor_corr[4]:L_Rho_actor ~ lkj_corr_cholesky( 2 ),
+vector[4]:sigma_block ~ dexp(1),
+cholesky_factor_corr[4]:L_Rho_block ~ lkj_corr_cholesky( 2 ),
+# compute ordinary correlation matrixes from Cholesky factors
+gq> matrix[4,4]:Rho_actor <<- Chol_to_Corr(L_Rho_actor),
+gq> matrix[4,4]:Rho_block <<- Chol_to_Corr(L_Rho_block)
+) , data=dat , chains=4 , cores=4 , log_lik=TRUE )
+```
+
+Advanced features of ulam in this model: The non-centered version of the model samples much more efficiently, producing more effective samples per parameter. In practice, this means you don’t need as many actual iterations, iter, to arrive at an equally good portrait of the posterior distribution. For larger data sets, the savings can mean hours of time. And in some problems, the centered version of the model just won’t give you a useful posterior.
+
+This model has 76 parameters: 4 average treatment effects, 4×7 varying effects on actor, 4×6 varying effects on block, 8 standard deviations, and 12 free correlation parameters. You can check them all for yourself with precis(m14.3,depth=3). But effectively the model has only about 27 parameters—check WAIC(m14.3). The two varying effects populations, one for actors and one for blocks, regularize the varying effects themselves. So as usual, each varying intercept or slope counts less than one effective parameter.
+
+Notes: A Cholesky decomposition L is a way to represent a square, symmetric matrix like a correlation
+matrix R such that R = LL^T . It is a marvelous fact that you can multiply L by a matrix of uncorrelated samples (z-scores) and end up with a matrix of correlated samples (the varying effects). This is the trick that lets us take the covariance matrix out of the prior. We just sample a matrix of uncorrelated z-scores and then multiply those by the Cholesky factor and the standard deviations to get the varying effects with the correct scale and correlation. It would be magic, except that it is just algebra.
+
+# 14.3 Instruments and causal design
+
+In chapter 6 we learned that many paths can connect a variable to an outcome. Some of those paths are causal, so we want to leave them open. We want to close the non-causal paths and also not accidentally open them by including the wrong variables in a model.
+
+##. Instrumental variables
+
+Consider the impact of education E on wages W. Does more school improve future wages? If we just regress wages on achieved education, we expect the inference to be biased by factors that influence both wages and education. For example, "industrious people" may both complete more education and earn higher wages, generating a correlation between education and wages. But that doesn’t necessarily mean that education causes higher wages; rather that the unobserved industriousness is correlated with higher wages and more education. 
+
+The backdoor path of "unobserved industriousness" to education ruins our day, because we can't condition on it. But if we can find a suitable "instrumental variable" you may be able to work some modular magic. Beware though, that these instruments can be "bias amplifiers" if used improperly, and actually make confounding matters much worse.
+
+Suppose Q indicates which quarter of the year a person was born in. Why might this influence education? Because people born earlier in the year tend to get less schooling. This is both because they are biologically older when they start school and because they become eligible to drop out of school earlier. Now, if it is true that Q influences W only through E, and Q is also not influenced by confounds U, then Q is one of these mysterious instrumental variables. This means we can use it in a special way to make a valid causal inference about E -> W without measuring U.
+
+```{r}
+set.seed(73)
+N <- 500 # 500 simulated people
+U_sim <- rnorm( N, 0, 1 )
+Q_sim <- sample( 1:4 , size=N , replace=TRUE ) # sampled quarters
+E_sim <- rnorm( N , U_sim + Q_sim ) # 
+W_sim <- rnorm( N , U_sim + 0*E_sim )
+dat_sim <- list(
+W=standardize(W_sim) ,
+E=standardize(E_sim) ,
+Q=standardize(Q_sim) )
+```
+
+```{r}
+m14.4 <- ulam(
+alist(
+W ~ dnorm( mu , sigma ),
+mu <- aW + bEW*E,
+aW ~ dnorm( 0 , 0.2 ),
+bEW ~ dnorm( 0 , 0.5 ),
+sigma ~ dexp( 1 )
+) , data=dat_sim , chains=4 , cores=4 )
+```
+
+```{r}
+precis( m14.4 )
+```
+### Model 2
+```{r}
+m14.5 <- ulam(
+alist(
+W ~ dnorm( mu , sigma ),
+mu <- aW + bEW*E + bQW*Q,
+aW ~ dnorm( 0 , 0.2 ),
+bEW ~ dnorm( 0 , 0.5 ),
+bQW ~ dnorm( 0 , 0.5 ),
+sigma ~ dexp( 1 )
+) , data=dat_sim , chains=4 , cores=4 )
+precis( m14.5 )
+```
+
+# 14.4. Social relations as correlated varying effects
+
+```{r}
+library(rethinking)
+data(KosterLeckie)
+d <- kl_dyads
+head(d)
+```
+Each row in this table is a dyad of households from a community in Nicaragua. We are interested in modeling gift exchanges among these households. The outcome variables giftsAB and giftsBA in each row are the count of gifts in each direction within each dyad. The variables hidA and hidB tell us the household IDs in each dyad, and did is a unique dyad ID number.
+
+```{r}
+plot(d$giftsAB, d$giftsBA)
+```
+```{r}
+cor(d$giftsAB, d$giftsBA)
+```
+
+The overall correlation here is 0.24. But taking this as a measure of balance of exchange would be a bad idea. First, the correlation changes if we switch the A/B labels. Since the labels are arbitrary, that means the measured correlation is also somewhat arbitrary. Second, the generative model in the background is that gifts can be explained both by the special relationship in each dyad—some households tend to exchange gifts frequently—as well as by the fact that some households give or receive a lot across all dyads, without regard to any special relationships among households. For example, if a household is poor, it might not give many gifts, but it might receive many. In order to statistically separate balanced exchange from generalized differences in giving and receiving, we need a model that treats these as separate. The type of model we’ll consider is often called a social relations model, or SRM.
+
+Specifically, we’ll model gifts from household A to household B as a combination of varying effects specific to the household and the dyad. The outcome variables, the gift counts, are
+Poisson variables—they are counts with no obvious upper bound. We’ll attach our varying
+effects to these counts with a log link, as in the previous chapters. This gives us the first part of the model:
+
+```{r}
+kl_data <- list(
+N = nrow(kl_dyads),
+N_households = max(kl_dyads$hidB),
+did = kl_dyads$did,
+hidA = kl_dyads$hidA,
+hidB = kl_dyads$hidB,
+giftsAB = kl_dyads$giftsAB,
+giftsBA = kl_dyads$giftsBA
+)
+```
+
+```{r}
+m14.7 <- ulam(
+alist(
+## two outcome variables, each direction of gifting in the dyad
+giftsAB ~ poisson( lambdaAB ),
+giftsBA ~ poisson( lambdaBA ),
+# chunk 1: alpha + giving effect + receiving effect + dyad effect
+log(lambdaAB) <- a + gr[hidA,1] + gr[hidB,2] + d[did,1] ,
+log(lambdaBA) <- a + gr[hidB,1] + gr[hidA,2] + d[did,2] ,
+a ~ normal(0,1),
+## chunk 2: gr matrix of varying effects
+## matrix gr has a row for each household and 2 columns:
+## one for the giving and one for receiving varying effect
+vector[2]:gr[N_households] ~ multi_normal(0,Rho_gr,sigma_gr),
+Rho_gr ~ lkj_corr(4),
+sigma_gr ~ exponential(1),
+## chunk 3: dyad effects
+transpars> matrix[N,2]:d <-
+compose_noncentered( rep_vector(sigma_d,2) , L_Rho_d , z ),
+matrix[2,N]:z ~ normal( 0 , 1 ),
+cholesky_factor_corr[2]:L_Rho_d ~ lkj_corr_cholesky( 8 ),
+sigma_d ~ exponential(1),
+## compute correlation matrix for dyads
+gq> matrix[2,2]:Rho_d <<- Chol_to_Corr( L_Rho_d )
+), data=kl_data , chains=4 , cores=4 , iter=2000 )
+```
+
+The intercept _a_ represents the averaging "gifting rate" -- on the log scale -- across all dyads. 
+* G_a is a varying effect parameter for the generalized giving tendency of household A, regardless of dyad
+* r_b is the generalized receiving of household B, regardless of dyad
+* d_AB is the dyad specific rate that A gives to B
+```{r}
+# y(A to B) ~ Poisson(lambda_AB)
+# log(lambda_AB) = a + g_A + r_b + d_AB
+```
+
+This implies that each household H needs varying effects g_H and rH. In addition, each dyad AB has two varying effects, dAB and dBA. We want to allow the _g_ and _r_ parameters to be correlated -- do people who give a lot also get a lot? We also want to allow the dyad effects to be correlated -- is there balance within dyads? We can accomplish this with two different multi-normal priors
+
+# 14.5 Continuous Categories and the Gaussian Process
+
+Spatial autocorrelation in Oceanic tools.
+
+This is a classic setting in which to use Gaussian process regression. We’ll define a distance matrix among the societies. Then we can estimate how similarity in tool counts depends upon geographic distance. You’ll see how to simultaneously incorporate ordinary
+predictors, so that the covariation among societies with distance will both control for and be controlled by other factors that influence technology.
+
+```{r}
+# load the distance matrix
+
+data(islandsDistMatrix)
+# display (measured in thousands of km)
+Dmat <- islandsDistMatrix
+colnames(Dmat) <- c("Ml","Ti","SC","Ya","Fi","Tr","Ch","Mn","To","Ha")
+round(Dmat,1)
+```
+
+We’ll use these distances as a measure of similarity in technology exposure. This will
+allow us to estimate varying intercepts for each society that account for non-independence
+in tools as a function of their geographical similarly.
+
+So what this function says is that the covariance between any two societiesi and j declines exponentially with the squared distance between them. The parameter p determines the rate of decline. If it is large, then covariance declines rapidly with squared distance.
+
+```{r}
+ data(Kline2) # load the ordinary data, now with coordinates
+d <- Kline2
+d$society <- 1:10 # index observations
+dat_list <- list(
+T = d$total_tools,
+P = d$population,
+society = d$society,
+Dmat=islandsDistMatrix )
+```
+
+```{r}
+m14.8 <- ulam(
+alist(
+T ~ dpois(lambda),
+lambda <- (a*P^b/g)*exp(k[society]),
+vector[10]:k ~ multi_normal( 0 , SIGMA ),
+matrix[10,10]:SIGMA <- cov_GPL2( Dmat , etasq , rhosq , 0.01 ),
+c(a,b,g) ~ dexp( 1 ),
+etasq ~ dexp( 2 ),
+rhosq ~ dexp( 0.5 )
+), data=dat_list , chains=4 , cores=4 , iter=2000 )
+```
+
+```{r}
+precis(m14.8, depth = 3)
+```
+
+* First, note that the coefficient for log population, bp, is very much as it was before we added all this Gaussian process stuff. This suggests that it’s hard to explain all of the association between tool counts and population as a side effect of geographic contact. 
+* Second, those g parameters are the Gaussian process varying intercepts for each society. Like a and bp, they are on the log-count scale, so they are hard to interpret raw.
+
+In order to understand the parameters that describe the covariance with distance, rhosq
+and etasq, we’ll want to plot the function they imply. Actually the joint posterior distribution of these two parameters defines a posterior distribution of covariance functions. We can get a sense of this distribution of functions—I know, this is rather meta—by plotting a bunch of them.
+```{r}
+post <- extract.samples(m14.8)
+# plot the posterior median covariance function
+plot( NULL , xlab="distance (thousand km)" , ylab="covariance" ,
+xlim=c(0,10) , ylim=c(0,2) )
+# compute posterior mean covariance
+x_seq <- seq( from=0 , to=10 , length.out=100 )
+pmcov <- sapply( x_seq , function(x) post$etasq*exp(-post$rhosq*x^2) )
+pmcov_mu <- apply( pmcov , 2 , mean )
+lines( x_seq , pmcov_mu , lwd=2 )
+# plot 60 functions sampled from posterior
+for ( i in 1:50 )
+curve( post$etasq[i]*exp(-post$rhosq[i]*x^2) , add=TRUE ,
+col=col.alpha("black",0.3) )
+```
+
+The posterior median function, shown by the thick curve, represents a center of plausibility. But the other curves show that there’s a lot of uncertainty about the spatial covariance. Curves that peak at twice the posterior median peak, around 0.2, are commonplace. And curves that peak at half the median are very common, as well. There’s a lot of uncertainty about how strong the spatial effect is, but the majority of posterior curves decline to zero covariance before 4000 kilometers.
+
+```{r}
+library(ape)
+data(Primates301) 
+data(Primates301_nex)
+d <- Primates301
+d$name <- as.character(d$name)
+dstan <- d[complete.cases(d$group_size, d$body, d$brain) , ]
+spp_obs <- dstan$name
+```
+
+```{r}
+library(ape)
+tree_trimmed <- keep.tip( Primates301_nex, spp_obs )
+Rbm <- corBrownian( phy=tree_trimmed )
+V <- vcv(Rbm)
+Dmat <- cophenetic( tree_trimmed )
+plot( Dmat , V , xlab="phylogenetic distance" , ylab="covariance" )
+```
+
+The above is a scatterplot with pairs of species as points. The horizontal axis is phylogenetic distnaces; vertical axis is covariance under Brownian model.
+
+```{r}
+# This code also won't run for some weird reason...
+# put species in right order
+dat_list$V <- V[ spp_obs , spp_obs ]
+# convert to correlation matrix
+dat_list$R <- dat_list$V / max(V)
+# Brownian motion model
+m14.10 <- ulam(
+alist(
+B ~ multi_normal( mu , SIGMA ),
+mu <- a + bM*M + bG*G,
+matrix[N_spp,N_spp]: SIGMA <- R * sigma_sq,
+a ~ normal( 0 , 1 ),
+c(bM,bG) ~ normal( 0 , 0.5 ),
+sigma_sq ~ exponential( 1 )
+), data=dat_list , chains=4 , cores=4 )
+precis( m14.10 )
+```

@@ -1,0 +1,105 @@
+---
+title: "Chaper 12"
+output: pdf_document
+---
+
+# 1. Overdispersion
+```{r}
+library(rethinking)
+pbar <- .5
+theta <- 5
+curve( dbeta2(x,pbar,theta) , from=0 , to=1 ,
+xlab="probability" , ylab="Density" )
+```
+
+
+(None of the overdispersion models in the chapter will run for me...)
+
+Recall that in the previous chapter, a binomial model of these data that omitted department ended up misleading, because there is an indirect path from gender through department to admission. That confound resulted in a spurious indication that female applicants had lower odds of admission. But the model above is not confounded, despite not containing the department variable. How is this?
+
+
+# 2. Zero-Inflated Outcomes
+
+```{r}
+# define parameters
+prob_drink <- 0.2 # 20% of days
+rate_work <- 1 # average 1 manuscript per day
+# sample one year of production
+N <- 365
+# simulate days monks drink
+set.seed(365)
+drink <- rbinom( N , 1 , prob_drink )
+# simulate manuscripts completed
+y <- (1-drink)*rpois( N , rate_work )
+```
+
+
+```{r}
+library(rethinking)
+m12.3 <- ulam(
+alist(
+y ~ dzipois( p , lambda ),
+logit(p) <- ap,
+log(lambda) <- al,
+ap ~ dnorm( -1.5 , 1 ),
+al ~ dnorm( 1 , 0.5 )
+) , data=list(y=y) , chains=4 )
+```
+
+
+
+
+
+```{r}
+precis(m12.3)
+```
+
+
+
+We can recover the parameters used to generate the sample data (20% chance of drinking, 1 manuscript per day)
+```{r}
+post <- extract.samples( m12.3 )
+mean( inv_logit( post$ap ) ) # probability drink
+mean( exp( post$al ) ) # rate finish manuscripts, when not drinking
+```
+
+# 3 Ordered Categorical Outcomes
+
+The trolly problem.
+
+```{r}
+data(Trolley)
+d <- Trolley
+head(d)
+```
+
+
+
+```{r}
+simplehist( d$response , xlim=c(1,7) , xlab="response" )
+```
+
+```{r}
+# discrete proportion of each response value
+pr_k <- table( d$response ) / nrow(d)
+# cumsum converts to cumulative proportions
+cum_pr_k <- cumsum( pr_k )
+# plot
+plot( 1:7 , cum_pr_k , type="b" , xlab="response" ,
+ylab="cumulative proportion" , ylim=c(0,1) )
+```
+
+```{r}
+logit <- function(x) log(x/(1-x)) # convenience function
+plot(round( lco <- logit( cum_pr_k ) , 2 ), type = 'b')
+```
+
+Beta-binomial and gamma-poisson (negative binomial) are ways to cope with over-dispersion.
+
+
+
+
+
+
+
+

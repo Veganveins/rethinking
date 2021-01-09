@@ -1,0 +1,410 @@
+---
+title: "Chapter 13 Notes"
+output: pdf_document
+---
+
+# I. Multilevel Tadpoles
+
+```{r}
+library(rethinking)
+data(reedfrogs)
+d <- reedfrogs
+head(d)
+```
+
+
+There is a lot of variation in these data. Some of the variation comes from experimental treatment. But a lot of it comes from other sources. Think of each row as a “tank,” an experimental environment that contains tadpoles. There are lots of things peculiar to each tank that go unmeasured, and these unmeasured factors create variation in survival across tanks, even when all the predictor variables have the same value. These tanks are an example of a cluster variable. Multiple observations, the tadpoles in this case, are made within each cluster.
+
+Here is a model for predicting tadpole mortality in each tank:
+
+```{r}
+# make the tank cluster variable
+d$tank <- 1:nrow(d)
+dat <- list(
+S = d$surv,
+N = d$density,
+tank = d$tank )
+```
+
+```{r}
+# approximate posterior
+m13.1 <- ulam(
+alist(
+S ~ dbinom( N , p ) ,
+logit(p) <- a[tank] ,
+a[tank] ~ dnorm( 0 , 1.5 )
+), data=dat , chains=4 , log_lik=TRUE )
+```
+
+
+```{r}
+precis(m13.1, depth = 2)
+```
+
+To get each tank’s expected survival probability, just take one of the a values and then use the logistic transform. So far there is nothing new here.
+
+## Multilevel Madness
+All that is required to enable adaptive pooling is to make the prior for the a parameters a function of some new parameters. 
+```{r}
+m13.2 <- ulam(
+alist(
+S ~ dbinom( N , p ) ,
+logit(p) <- a[tank] ,
+a[tank] ~ dnorm( a_bar , sigma ) ,
+a_bar ~ dnorm( 0 , 1.5 ) ,
+sigma ~ dexp( 1 )
+), data=dat , chains=4 , log_lik=TRUE )
+
+```
+
+Notice that the prior for the tank intercepts is now a function of two parameters, alphabar and sigma. The Gaussian distribution with mean alpha_bar and standard deviation sigma is the prior for each tank’s intercept. But that prior itself has priors for alphabar and sigma. So there are two levels in the model, each resembling a simpler model.
+
+The two parameters alphabar and sigma are often referred to as hyperparameters (they are parameters for parameters)
+
+In the multilevel tadpole model, the population of tanks is assumed to be Gaussian. Why? The least satisfying answer is “convention.” The Gaussian assumption is extremely common. A more satisfying answer is “pragmatism.” The Gaussian assumption is easy to work with, and it generalizes easily to more than one dimension. This generalization will be important for handling varying slopes in the next chapter. But my preferred answer is instead “entropy.” If all we are willing to say about a distribution is the mean and variance, then the Gaussian is the most conservative assumption. The distribution looks symmetric, because if you don’t say how it is skewed, then symmetric is the maximum entropy shape.
+
+Computing the posterior computes both levels simultaneously, in the same way that our robot at the start of the chapter learned both about each café and the variation among cafés. But you cannot fit this model with quap. Why? Because the probability of the data must now average over the level 2 parameters alphabar and sigma. But quap just hill climbs, using static values for all of the parameters. It can’t see the levels. Ordinary quadratic approximation cannot handle the averaging in the likelihood, because in general it’s not possible to derive an analytical solution. That means there is no unified function for calculating the log-posterior. So your computer cannot directly find its minimum (the maximum of the posterior).
+
+```{r}
+precis(m13.2)
+```
+
+The mean for sigma is around 1.6. This is a regularizing prior but this time the amount of regularization has been learned from the data itself.
+
+```{r}
+compare(m13.1, m13.2)
+```
+
+* The multilevel model has only 21 effective parameters. There are 28 fewer effective parameters than actual parameters, because the prior assigned
+to each intercept shrinks them all towards the mean alphabar. The extra two parameters in the multilevel model allowed it to learn a more aggressive regularizing prior, to adaptively regularize. This resulted in a less flexible posterior and therefore fewer effective parameters.
+
+## Appreciate the impact of this adaptive regularization
+
+```{r}
+# extract Stan samples
+post <- extract.samples(m13.2)
+# compute median intercept for each tank
+# also transform to probability with logistic
+d$propsurv.est <- logistic( apply( post$a , 2 , mean ) )
+# display raw proportions surviving in each tank
+plot( d$propsurv , ylim=c(0,1) , pch=16 , xaxt="n" ,
+xlab="tank" , ylab="proportion survival" , col=rangi2 )
+axis( 1 , at=c(1,16,32,48) , labels=c(1,16,32,48) )
+# overlay posterior means
+points( d$propsurv.est )
+# mark posterior mean probability across tanks
+abline( h=mean(inv_logit(post$a_bar)) , lty=2 )
+# draw vertical dividers between tank densities
+abline( v=16.5 , lwd=0.5 )
+abline( v=32.5 , lwd=0.5 )
+text( 8 , 0 , "small tanks" )
+text( 16+8 , 0 , "medium tanks" )
+```
+
+* Notice that in every case, the multilevel estimate (open circle) is closer to the dashed line than the raw empirical estimate (blue). It’s as if the entire distribution of black circles has been shrunk towards the dashed line at the center of the data, leaving the blue points behind on the outside. This phenomenon is sometimes called shrinkage, and it results from regularization
+
+* Also notice that the estimates for the smaller tanks have shrunkk _farther_ from the blue points. Varying intercepts for the smaller tanks, with smaller sample sizes, shrink more.
+
+* The farther a blue point is from the dashed line, the greater the distance between it and the corresponding multilevel estimate. Shrinkage is stronger the further a tank's empirical proportion is from the global average alpha.
+
+All three of these phenomena arise from pooling information across clusters (tanks) to improve estimates. Pooling means that each tank provides information that can be used to improve the estimates for all of the other tanks.
+
+What does the inferred population distribution of survivial look like?
+
+```{r}
+# show first 100 populations in the posterior
+plot( NULL , xlim=c(-3,4) , ylim=c(0,0.35) ,
+xlab="log-odds survive" , ylab="Density" )
+for ( i in 1:100 )
+curve( dnorm(x,post$a_bar[i],post$sigma[i]) , add=TRUE ,
+col=col.alpha("black",0.2) )
+# sample 8000 imaginary tanks from the posterior distribution
+sim_tanks <- rnorm( 8000 , post$a_bar , post$sigma )
+```
+Notice that there is uncertainty about the location, alpha, and scale, sigma, of the population distribution of log-odds of survival. All of this uncertainty is propagated into the simulated probabilities of survival.
+
+```{r}
+# transform to probability and visualize
+dens( inv_logit(sim_tanks) , lwd=2 , adj=0.1 )
+```
+
+R emember that “sampling” from a posterior distribution is not a simulation of empirical sampling. It’s just a convenient way to characterize and work with the
+uncertainty in the distribution.
+
+Varying intercepts allow count outcomes to be overdispersed. When each observed count gets its own unique intercept, but these intercepts are pooled through a common distribution, the predictions expect over-dispersion just like a beta-binomial or gamma-Poisson model would. Compared to a beta-binomial or gammaPoisson model, a binomial or Poisson model with a varying intercept on every observed outcome will
+often be easier to estimate and easier to extend.
+
+
+
+
+
+
+Notes: The examples in this book use weakly regularizing exponential priors for variance components, the sigma parameters that estimate the variation across clusters in the data. These exponential priors work very well in routine multilevel modeling. In certain cases though, when the number of clusters is small the chain may be inefficient and have small n_eff values or possibly many divergent transitions because the exponential pror has such a long tail. To improve such a model, instead of using exponential priors for the variance you can use half-Normal priors (or some other prior with a short tail.)
+
+## Varying Effects and the Undefitting/Overfitting Tradeoff
+
+A major benefit of using varying effects estimates, instead of the empirical raw estimates, is that they provide more accurate estimates of the individual cluster (tank) intercepts. To understand this in the context of the reed frog example, suppose that instead of experimental tanks we had natural ponds. Imagine the problem of predicting future survival in these ponds, from three perspectives:
+
+(1) Complete pooling. This means we assume that the population of ponds is invariant,
+the same as estimating a common intercept for all ponds.
+
+(2) No pooling. This means we assume that each pond tells us nothing about any other
+pond. This is the model with amnesia.
+
+(3) Partial pooling. This means using an adaptive regularizing prior, as in the previous section. (varying intercepts)
+
+First, suppose you ignore the varying intercepts and just use the overall mean across all ponds, alpha, to make your predictions for each pond. A lot of data contributes to your estimate of alpha, and so it can be quite precise. However, your estimate of alpha is unlikely to exactly match the mean of any particular pond. As a result, the total sample mean underfits the data. This sort of model is equivalent to assuming that the variation among ponds is zero—all ponds are identical.
+
+Second, suppose you use the survival proportions for each pond to make predictions.
+This means using a separate intercept for each pond. The blue points in Figure 13.1 are this same kind of estimate. In each particular pond, quite little data contributes to each estimate, and so these estimates are rather imprecise. This is particularly true of the smaller ponds, where less data goes into producing the estimates. As a consequence, the error of these estimates is high, and they are rather overfit to the data. Standard errors for each intercept can be very large, and in extreme cases, even infinite. These are sometimes called the no pooling estimates. No information is shared across ponds. It’s like assuming that the variation among ponds is infinite, so nothing you learn from one pond helps you predict another.
+
+Third, when you estimate varying intercepts, you use partial pooling of information
+to produce estimates for each cluster that are less underfit than the grand mean and less overfit than the no-pooling estimates. As a consequence, they tend to be better estimates of the true per-cluster (per-pond) means. This will be especially true when ponds have few tadpoles in them, because then the no pooling estimates will be especially overfit. When a lot of data goes into each pond, then there will be less difference between the varying effect estimates and the no pooling estimates.
+
+_To demonstrate this fact, we’ll simulate some tadpole data. That way, we’ll know the true per-pond survival probabilities. Then we can compare the no-pooling estimates to the partial pooling estimates, by computing how close each gets to the true values they are trying to estimate. The rest of this section shows how to do such a simulation_
+
+_Learning to simulate and validate models and model fitting in this way is extremely valuable. Once you start using more complex models, you will want to ensure that your code is working and that you understand the model. You can help in this project by simulating data from the model, with specified parameter values, and then making sure that your method of estimation can recover the parameters within tolerable ranges of precision. Even just simulating data from a model structure has a huge impact on understanding_
+
+# Data simulation
+
+### Step 1: Assign values to the parameters
+
+```{r}
+a_bar <- 1.5
+sigma <- 1.5
+nponds <- 60
+Ni <- as.integer( rep( c(5,10,25,35) , each=15 ) ) # sample size per pond
+```
+
+Simulate
+```{r}
+set.seed(5005)
+a_pond <- rnorm( nponds , mean=a_bar , sd=sigma )
+```
+
+
+```{r}
+dsim <- data.frame( pond=1:nponds , Ni=Ni , true_a=a_pond )
+head(dsim)
+```
+
+### Step 2: Simulate survivors
+
+Each pond has n_i potential survivors. Our model will use the logit link, so the probability of survival is exp(true_a) / (1 + exp(true_a)) _(logistic(true_a)(._
+
+```{r}
+# repeat 60 times, taking a sample of size Ni with probability logistic(true_a)
+dsim$Si <- rbinom(n = nponds, size = dsim$Ni, prob = logistic(dsim$true_a))
+head(dsim)
+```
+
+### Step 3: Compute the "No-Pooling" Estimates
+
+```{r}
+dsim$p_nopool <- dsim$Si / dsim$Ni
+```
+
+### Step 4: Compute the "Varying Intercept" Estimates
+
+```{r}
+dat <- list( Si=dsim$Si , Ni=dsim$Ni , pond=dsim$pond )
+m13.3 <- ulam(
+alist(
+Si ~ dbinom( Ni , p ),
+logit(p) <- a_pond[pond],
+a_pond[pond] ~ dnorm( a_bar , sigma ),
+a_bar ~ dnorm( 0 , 1.5 ),
+sigma ~ dexp( 1 )
+), data=dat , chains=4 )
+```
+
+```{r}
+precis(m13.3, depth = 2)
+```
+```{r}
+post <- extract.samples( m13.3 )
+dsim$p_partpool <- apply( inv_logit(post$a_pond) , 2 , mean )
+head(dsim)
+```
+
+Compute the true per-pond survival probabilities used to _generate_ the data
+```{r}
+dsim$p_true <- inv_logit(dsim$true_a)
+head(dsim)
+```
+
+Compute error between p_true and the nopool and partpool estimates:
+```{r}
+dsim$pool_MAE = abs(dsim$p_partpool - dsim$p_true)
+dsim$nopool_MAE = abs(dsim$p_nopool - dsim$p_true)
+head(dsim)
+```
+
+
+```{r}
+ggplot(dsim, aes(pool_MAE, color = 'Pooling MAE'))+
+  facet_wrap(~Ni)+
+  geom_density()+
+  geom_density(aes(nopool_MAE, color = 'No Pooling MAE'))
+```
+```{r}
+ggplot(dsim, aes(pool_MAE, nopool_MAE))+
+  facet_wrap(~Ni)+
+  geom_point()
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+compare = dsim %>% group_by(Ni) %>% summarise(avg_pool_MAE = mean(pool_MAE), avg_no_pool_MAE = mean(nopool_MAE)) %>% mutate(lift = avg_no_pool_MAE - avg_pool_MAE)
+
+
+ggplot(compare, aes(x = Ni, y = lift, fill = 'Pool Improvement over No Pool'))+
+  geom_bar(stat = 'identity', position = 'dodge')
+```
+
+Here, the ponds with the smallest sample size show the greatest improvement over the naive no-pooling estimates. This is no coincidence. Shrinkage towards the mean results from trying to negotiate the underfitting and overfitting risks of the grand mean on one end and the individual means of each pond on the other. The smaller tanks/ponds contain less information, and so their
+varying estimates are influenced more by the pooled information from the other ponds.
+
+In other words, small ponds are prone to overfitting, and so they receive a bigger dose of the underfit grand mean. Likewise, the larger ponds shrink much less, because they contain more
+information and are prone to less overfitting. Therefore they need less correcting. When individual ponds are very large, pooling in this way does hardly anything to improve estimates, because the estimates don’t have far to go. But in that case, they also don’t do any harm, and the information pooled from them can substantially help prediction in smaller ponds.
+
+_This is a form of regularization that is learned from the data itself_
+
+But there are some cases in which the no-pooling estimates are better. These exceptions
+often result from ponds with extreme probabilities of survival. The partial pooling estimates
+shrink such extreme ponds towards the mean, because few ponds exhibit such extreme behavior. But sometimes outliers really are outliers.
+
+
+# II. Multilevel Chimpanzees
+## More than one type of cluster
+
+Cross-classified multi-level models work with data structures where actors are _not_ nested within unique blocks. 
+
+We'll take the chimpanzee model from Chapter 11 (m11.4) and add varying intercepts by _replacing the fixed regularizing prior with an adaptive prior._ We'll also add a second cluster type "block."
+
+Each cluster gets its own vector of parameters: For actors, the vector is alpha, and has length 7 because there are 7 chimpanzees in the sample. For blocks, the vector is gamma, and it has length 6 because there are 6 blocks. Each cluster variable needs its own standard deviation parameter that adapts the amount of pooling across units, be they actors or blocks.
+
+```{r}
+data(chimpanzees)
+d <- chimpanzees
+d$treatment <- 1 + d$prosoc_left + 2*d$condition
+dat_list <- list(
+pulled_left = d$pulled_left,
+actor = d$actor,
+block_id = d$block,
+treatment = as.integer(d$treatment) )
+```
+
+```{r}
+set.seed(13)
+m13.4 <- ulam(
+alist(
+pulled_left ~ dbinom( 1 , p ) ,
+logit(p) <- a[actor] + g[block_id] + b[treatment] ,
+b[treatment] ~ dnorm( 0 , 0.5 ),
+## adaptive priors
+a[actor] ~ dnorm( a_bar , sigma_a ),
+g[block_id] ~ dnorm( 0 , sigma_g ),
+## hyper-priors
+a_bar ~ dnorm( 0 , 1.5 ),
+sigma_a ~ dexp(1),
+sigma_g ~ dexp(1)
+) , data=dat_list , chains=4 , cores=4 , log_lik=TRUE )
+
+```
+
+This is easily the most complicated model we've seen in the book thus far.
+
+```{r}
+precis(m13.4, depth = 2)
+```
+
+n-eff varies quite a lot across parameters. This is common in complex models....one reason is that some parameters spend a lot of time near a "boundary." Here, that parameter is _sigmag_. It spends a lot of time near its minimum of 0, so there isn't as much "variety' to gather a wider range of parameter values. Some rhat values are still above 1 which is a sign of inefficient sampling.
+
+* Comapring sigma_a to sigma_g we see that the estimated variation among _actors_ is a lot larger than the estimated variation among _blocks._ You can see this in the precis plot--the model is certain that actors vary more than blocks. (this is consistent with the fact that the _a_ distributions are much more scattered than the _g_ distributions)
+
+```{r}
+plot(precis(m13.4, depth = 2))
+```
+```{r}
+post = extract.samples(m13.4)
+sigma_a = post$sigma_a
+sigma_g = post$sigma_g
+
+sigmas = data.frame(a = sigma_a, g = sigma_g)
+ggplot(sigmas, aes(sigma_a, color = 'sigma_a'))+
+  geom_density()+
+  geom_density(aes(sigma_g, color = 'sigma g'))
+```
+
+
+
+Here's a model that will ignore block:
+```{r}
+set.seed(14)
+m13.5 <- ulam(
+alist(
+pulled_left ~ dbinom( 1 , p ) ,
+logit(p) <- a[actor] + b[treatment] ,
+b[treatment] ~ dnorm( 0 , 0.5 ),
+a[actor] ~ dnorm( a_bar , sigma_a ),
+a_bar ~ dnorm( 0 , 1.5 ),
+sigma_a ~ dexp(1)
+) , data=dat_list , chains=4 , cores=4 , log_lik=TRUE )
+```
+
+```{r}
+compare( m13.4 , m13.5 )
+```
+
+Look at the pWAIC column, which reports the "effective number of parameters." While m13.4
+has 7 more parameters than m13.5 does, it has only 2 more effective parameters. Why? Because the posterior distribution for sigma_g ended up close to zero. This means each of
+the 6 _g_ parameters is strongly shrunk towards zero—they are relatively inflexible. In contrast, the _a_ parameters are shrunk towards zero much less, because the estimated variation across actors is much larger, resulting in less shrinkage. But as a consequence, each of the _a_ parameters contributes much more to the pWAIC value.
+
+These two models imply nearly identical predictions, and so their expected out-of-sample accuracy is
+nearly identical. The block parameters have been shrunk so much towards zero that they do
+very little work in the model.
+
+## Divergent Transitions and Non-Centered Priors
+
+"Distributions with steep regions are hard to explore"
+
+* The first trick to dealing with divergence is to tune the simulation so that it doesn’t overshoot the valley wall. This means doing more warmup with a higher target acceptance rate, Stan’s adapt_delta. But for many models, you can never tune the sampler enough to remove the divergent transitions. When adapt_delta is set high, it results in a smaller step size, which means a
+more accurate approximation of the curved surface. It can also mean slower exploration of
+the distribution.
+
+* The second trick is to write the statistical model in a new way, to reparameterize it. For any given statistical model, it can be written in several forms that are mathematically identical but numerically different. Switching a model from one form to another is called reparameterization. (Non-centered vs centered paramaterization; see "Devil's Funnel"...)
+
+In model m13.4, the adaptive priors that make it a multilevel model have parameters inside
+them. These are causing regions of steep curvature and generating divergent transitions. We
+can fix that though.
+
+# Multilevel Posterior Predictions
+
+One robust way to discover mistakes is to compare the sample to the posterior predictions of a fit model. The same procedure, producing implied predictions from a fit model, is very helpful for understanding what the model means. Another role for constructing implied predictions is in computing information criteria, like WAIC, to estimate of out-of-sample model accuracy, the KL divergence. In practical terms, information criteria provide a rough measure of a model’s flexibility and therefore overfitting risk.
+
+The introduction of varying effects does introduce nuance, however. First, we should no longer expect the model to exactly retrodict the sample, because adaptive regularization has as its goal to trade off poorer fit in sample for better inference and hopefully better fit out of sample. That is what shrinkage does for us. Of course, we should never be trying to really retrodict the sample. But now you have to expect that even a perfectly good model fit will differ from the raw data in a systematic way.
+
+If we wish to validate a model against the specific clusters used to fit the model, that is one thing. But if we instead wish to compute predictions for new clusters, other than the ones observed in the sample, that is quite another. 
+
+## Posterior Prediction for same clusters
+
+For example, in data(chimpanzees), there are 7 unique actors. These are the clusters. The varying intercepts model, m13.4, estimated an intercept for each, in addition to two parameters to describe the mean and standard deviation of the population of actors. We’ll construct posterior predictions (retrodictions), using both the automated link approach and doing it from scratch, so there is no confusion.
+
+## Posterior Prediction for new clusters
+
+Suppose you want to predict how chimpanzees in another population would respond to our lever pulling experiment. The particular 7 chimpanzees in the sample allowed us to estimate 7 unique intercepts. But these individual actor intercepts aren’t of interest, because none of these 7 individuals is in the new population.
+
+## Post-Stratification
+
+Post-stratification does not always work. It is not justified when the outcome of interest _causes_ selection bias. Suppose for example that only supporters respond. Then V = 1 for everyone who responds. Selection on the outcome variable is one of the worst things that can happen in statistics.
+
+
+
+
+Notes:
+
+Using as.integer before passing the data to Stan or ulam will resolve certin mysterious warning messages.
+
+
