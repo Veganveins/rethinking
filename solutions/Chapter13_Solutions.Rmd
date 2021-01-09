@@ -1,0 +1,8 @@
+---
+title: "Chapter 13 Solutions"
+output: pdf_document
+---
+
+https://rpubs.com/mondler/702417
+
+https://api.rpubs.com/tkanula0703/705738
